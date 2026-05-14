@@ -27,4 +27,3 @@ claude2md = "claude2md:main"
 
 [project.urls]
 Repository = "https://github.com/twilligon/claude2md"
-Issues = "https://github.com/twilliddgon/claude2md/issues"
