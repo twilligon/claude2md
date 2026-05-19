@@ -4,6 +4,8 @@ Convert Claude.ai or Claude Code chat exports to Markdown format.
 
 `claude2md` converts chats exported from Claude.ai or Claude Code to Markdown format. This lets you efficiently show entire chats to other models or instances until you struggle to remember which transcript of a chat full of transcripts of chats full of transcripts of chats is the right one (aka slopception).
 
+For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) is the companion tool that fetches the JSON files `claude2md` reads. For Claude Code, the JSONL files live under `~/.claude/projects/`.
+
 ## Features
 
 You can filter the exports to any subset of user, assistant, and thinking blocks. For context management I've found it's often helpful to only export user messages, though obviously for the strongest "continuity" between an exported chat transcript and its consumer you want all context from the prior chat. Though Claude typically does not get to see its past thinking, so `--no-thinking` (our default) ought to be just as good if not better than including thinking blocks (by virtue of being on-distribution).
