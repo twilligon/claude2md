@@ -6,6 +6,7 @@
 
 __version__ = "0.2"
 
+from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
@@ -64,28 +65,22 @@ class Message:
 
     @classmethod
     def from_json(cls, data):
-        # Try to get content from different possible locations
         content = data.get("message", {}).get("content") or data.get("content")
         if not content:
             raise KeyError("No content field found in message data")
 
-        # Handle content as either a string or an array of block objects
         if isinstance(content, str):
-            # Simple string content - create a text block
             blocks = [Block("text", content)]
         elif isinstance(content, list):
-            # Array of block objects
             blocks = [
                 block for block in (Block.from_json(obj) for obj in content) if block
             ]
         else:
             blocks = []
         parent = data.get("parentUuid") or data.get("parent_message_uuid")
-        # Treat null UUID as None (no parent)
         if parent == NULL_UUID:
             parent = None
 
-        # Try to get role from different possible locations
         role_value = data.get("message", {}).get("role") or data.get("sender")
         if not role_value:
             raise KeyError("No role field found in message data")
@@ -98,7 +93,7 @@ class Message:
             attachments=data.get("attachments", []),
         )
 
-    def render(self, thinking=True):
+    def render(self, thinking=True, prefix=""):
         parts = []
 
         if self.role == Role.USER:
@@ -125,8 +120,9 @@ class Message:
             for block in self.blocks:
                 parts.append(block.content)
 
-            text = "\n\n".join(parts)
-            return re.sub(r"^", "> ", text, flags=re.MULTILINE)
+            return f"\n{prefix}> \n".join(
+                re.sub(r"^", f"{prefix}> ", p, flags=re.MULTILINE) for p in parts
+            )
 
         elif self.role == Role.ASSISTANT:
             for block in self.blocks:
@@ -137,7 +133,9 @@ class Message:
                 else:
                     parts.append(block.content)
 
-            return "\n\n".join(parts)
+            return f"\n{prefix}\n".join(
+                re.sub(r"^", prefix, p, flags=re.MULTILINE) for p in parts
+            )
 
         return ""
 
@@ -148,7 +146,7 @@ class Chat:
 
     messages: dict = field(init=False, default_factory=dict)
     metadata: dict = field(init=False, default_factory=dict)
-    leaves: list = field(init=False, default_factory=list)
+    leaves: dict = field(init=False, default_factory=dict)
 
     def __post_init__(self):
         unparsed = self.file.read()
@@ -166,30 +164,55 @@ class Chat:
                     self.messages[msg.uuid] = msg
 
         all_parents = {msg.parent for msg in self.messages.values() if msg.parent}
-        self.leaves = [uuid for uuid in self.messages.keys() if uuid not in all_parents]
+        self.leaves = {
+            uuid: msg for uuid, msg in self.messages.items() if uuid not in all_parents
+        }
 
-    def print_branch(self, uuid, user=True, assistant=True, thinking=False, title=None):
-        msg = self.messages[uuid]
-
-        if msg.parent:
-            self.print_branch(msg.parent, user, assistant, thinking, title)
-        elif title:
-            chat_name = self.metadata.get("name")
-            if title is True:
-                title_text = chat_name or "Untitled"
-                print(f"# {title_text}\n")
-            elif chat_name:
-                print(f"# {chat_name}\n")
-
+    def print_message(self, msg, user=True, assistant=True, thinking=False, prefix=""):
         if msg.role == Role.USER and not user:
             return
         if msg.role == Role.ASSISTANT and not assistant:
             return
-
-        rendered = msg.render(thinking=thinking)
+        rendered = msg.render(thinking=thinking, prefix=prefix)
         if rendered:
             print(rendered)
-            print()
+            print(prefix)
+
+    def print_title(self, title, prefix=""):
+        if not title:
+            return
+        chat_name = self.metadata.get("name")
+        if title is True:
+            title_text = chat_name or "Untitled"
+            print(f"{prefix}# {title_text}\n{prefix}")
+        elif chat_name:
+            print(f"{prefix}# {chat_name}\n{prefix}")
+
+    def print_branch(self, msg, user=True, assistant=True, thinking=False, title=None):
+        if msg.parent is not None:
+            self.print_branch(
+                self.messages[msg.parent], user, assistant, thinking, title
+            )
+        else:
+            self.print_title(title)
+        self.print_message(msg, user, assistant, thinking)
+
+    def print_all(self, user=True, assistant=True, thinking=False, title=None):
+        self.print_title(title, prefix=",".join(self.leaves) + "\t")
+
+        descendants = defaultdict(list)
+
+        def walk(msg, leaf):
+            if msg.parent is not None:
+                walk(self.messages[msg.parent], leaf)
+            descendants[msg.uuid].append(leaf)
+
+        for leaf, msg in self.leaves.items():
+            walk(msg, leaf)
+
+        for uuid, leaves in descendants.items():
+            prefix = ",".join(leaves) + "\t"
+            self.print_message(self.messages[uuid], user, assistant, thinking, prefix)
 
     def print_leaves(self, uuids=None, file=None):
         if uuids is None:
@@ -228,22 +251,24 @@ class Chat:
 
     def get_leaf(self, prefix=""):
         with suppress(ValueError):
-            return str(UUID(prefix))
+            return self.messages[str(UUID(prefix))]
 
-        matches = [uuid for uuid in self.leaves if uuid.startswith(prefix)]
+        matches = [
+            (uuid, msg) for uuid, msg in self.leaves.items() if uuid.startswith(prefix)
+        ]
 
         match matches:
             case []:
                 print(f'Error: No leaf matches prefix "{prefix}"', file=sys.stderr)
                 return None
-            case [single]:
+            case [(_, single)]:
                 return single
             case multiple:
                 print(
                     f'Error: Multiple leaves match prefix "{prefix}":',
                     file=sys.stderr,
                 )
-                self.print_leaves(multiple, file=sys.stderr)
+                self.print_leaves((u for u, _ in multiple), file=sys.stderr)
                 return None
 
 
@@ -269,7 +294,10 @@ def main():
         help="List all branch message UUIDs",
     )
     nav_group.add_argument(
-        "--branch", dest="leaf", metavar="UUID", help="Show chain to specific branch"
+        "--branch",
+        dest="leaf",
+        metavar="UUID|ALL",
+        help="Show chain to specific branch",
     )
 
     parser.add_argument(
@@ -327,12 +355,14 @@ def main():
 
     if args.leaves:
         chat.print_leaves()
-    elif uuid := (
+    elif args.leaf == "ALL":
+        chat.print_all(args.user, args.assistant, args.thinking, args.title)
+    elif msg := (
         (args.leaf and chat.get_leaf(args.leaf))
-        or chat.metadata.get("current_leaf_message_uuid")
+        or chat.messages.get(chat.metadata.get("current_leaf_message_uuid", ""))
         or chat.get_leaf()
     ):
-        chat.print_branch(uuid, args.user, args.assistant, args.thinking, args.title)
+        chat.print_branch(msg, args.user, args.assistant, args.thinking, args.title)
 
 
 if __name__ == "__main__":
