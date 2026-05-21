@@ -188,18 +188,12 @@ class Chat:
         elif chat_name:
             print(f"{prefix}# {chat_name}\n{prefix}")
 
-    def print_branch(self, msg, user=True, assistant=True, thinking=False, title=None):
+    def print_branch(self, msg, user=True, assistant=True, thinking=False):
         if msg.parent is not None:
-            self.print_branch(
-                self.messages[msg.parent], user, assistant, thinking, title
-            )
-        else:
-            self.print_title(title)
+            self.print_branch(self.messages[msg.parent], user, assistant, thinking)
         self.print_message(msg, user, assistant, thinking)
 
-    def print_all(self, user=True, assistant=True, thinking=False, title=None):
-        self.print_title(title, prefix=",".join(self.leaves) + "\t")
-
+    def print_all(self, user=True, assistant=True, thinking=False):
         descendants = defaultdict(list)
 
         def walk(msg, leaf):
@@ -356,13 +350,15 @@ def main():
     if args.leaves:
         chat.print_leaves()
     elif args.leaf == "ALL":
-        chat.print_all(args.user, args.assistant, args.thinking, args.title)
+        chat.print_title(args.title, prefix=",".join(chat.leaves) + "\t")
+        chat.print_all(args.user, args.assistant, args.thinking)
     elif msg := (
         (args.leaf and chat.get_leaf(args.leaf))
         or chat.messages.get(chat.metadata.get("current_leaf_message_uuid", ""))
         or chat.get_leaf()
     ):
-        chat.print_branch(msg, args.user, args.assistant, args.thinking, args.title)
+        chat.print_title(args.title)
+        chat.print_branch(msg, args.user, args.assistant, args.thinking)
 
 
 if __name__ == "__main__":
