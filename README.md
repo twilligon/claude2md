@@ -4,7 +4,7 @@ Convert Claude.ai or Claude Code chat exports to Markdown format.
 
 `claude2md` converts chats exported from Claude.ai or Claude Code to Markdown format. This lets you efficiently show entire chats to other models or instances until you struggle to remember which transcript of a chat full of transcripts of chats full of transcripts of chats is the right one (aka slopception).
 
-For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) is the companion tool that fetches the JSON files `claude2md` reads. For Claude Code, the JSONL files live under `~/.claude/projects/`.
+For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) can fetch a local copy of your chats for `claude2md`.
 
 ## Features
 
@@ -38,28 +38,28 @@ The bleeding-edge way:
 ## Usage
 
     $ claude2md --help
-    usage: claude2md [-h] [--branches | --branch UUID] [--user] [--no-user]
-                     [--assistant] [--no-assistant] [--thinking]
-                     [--no-thinking] [--title] [--no-title]
-                     [file]
+    usage: claude2md [-h] [-v] [--branches | -b UUID|ALL] [-u] [--no-user] [-a]
+                 [--no-assistant] [-t] [--no-thinking] [--title] [--no-title]
+                 [file]
 
     Convert Claude.ai or Claude Code chats to Markdown
 
     positional arguments:
-      file            JSON file to convert (default: stdin)
+      file                   JSON file to convert (default: stdin)
 
     options:
-      -h, --help      show this help message and exit
-      --branches      List all branch message UUIDs
-      --branch UUID   Show chain to specific branch
-      --user          Show user messages (default)
-      --no-user       Hide user messages
-      --assistant     Show assistant (default)
-      --no-assistant  Hide assistant
-      --thinking      Show thinking blocks
-      --no-thinking   Hide thinking (default)
-      --title         Always show title (or "Untitled" if none)
-      --no-title      Never show title
+      -h, --help             show this help message and exit
+      -v, --version          show program's version number and exit
+      --branches             List all branch message UUIDs
+      -b, --branch UUID|ALL  Show chain to specific branch
+      -u, --user             Show user messages (default)
+      --no-user              Hide user messages
+      -a, --assistant        Show assistant (default)
+      --no-assistant         Hide assistant
+      -t, --thinking         Show thinking blocks
+      --no-thinking          Hide thinking (default)
+      --title                Always show title (or "Untitled" if none)
+      --no-title             Never show title
 
 ## Examples
 

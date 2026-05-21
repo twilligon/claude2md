@@ -266,11 +266,30 @@ class Chat:
                 return None
 
 
+class _HelpFormatter(argparse.HelpFormatter):
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=float("inf"))
+
+    def _format_action_invocation(self, action):
+        if not action.option_strings or action.nargs == 0:
+            return super()._format_action_invocation(action)
+        default = self._get_default_metavar_for_optional(action)
+        args_string = self._format_args(action, default)
+        return ", ".join(action.option_strings) + " " + args_string
+
+
 def main():
     sys.setrecursionlimit(100_000)  # lol
 
     parser = argparse.ArgumentParser(
-        description="Convert Claude.ai or Claude Code chats to Markdown"
+        description="Convert Claude.ai or Claude Code chats to Markdown",
+        formatter_class=_HelpFormatter,
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "file",
@@ -288,6 +307,7 @@ def main():
         help="List all branch message UUIDs",
     )
     nav_group.add_argument(
+        "-b",
         "--branch",
         dest="leaf",
         metavar="UUID|ALL",
@@ -295,6 +315,7 @@ def main():
     )
 
     parser.add_argument(
+        "-u",
         "--user",
         dest="user",
         action="store_true",
@@ -311,6 +332,7 @@ def main():
         "--no-human", dest="user", action="store_false", help=argparse.SUPPRESS
     )
     parser.add_argument(
+        "-a",
         "--assistant",
         dest="assistant",
         action="store_true",
@@ -321,6 +343,7 @@ def main():
         "--no-assistant", dest="assistant", action="store_false", help="Hide assistant"
     )
     parser.add_argument(
+        "-t",
         "--thinking",
         dest="thinking",
         action="store_true",
