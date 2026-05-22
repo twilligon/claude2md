@@ -12,7 +12,7 @@ You can filter the exports to any subset of user, assistant, and thinking blocks
 
 We try to include Claude.ai attachments when they're available in the export, but the format we parse right now does not have them embedded in the JSON or anything, so in practice only attachments with `extracted_content`, i.e. text files, markdown, etc. will be present in the transcripts.
 
-You can branch conversations on Claude.ai (and to a lesser extent in Claude Code), and `claude2md` can export any branch. You can list the branches of a chat and their IDs with `claude2md --branches` and export a specific branch with `claude2md --branch ID`.
+You can branch conversations on Claude.ai (and to a lesser extent in Claude Code), and `claude2md` can export any branch. You can list the branches of a chat and their IDs with `claude2md --branches`, export a specific branch with `claude2md --branch ID`, or dump every branch at once with `claude2md --all-branches` (each line gets tagged with the IDs of the branches that contain it).
 
 We don't support "Claude Code on the Web" yet, though ostensibly if you "teleport" a Web session to a local Claude Code instance, you can export the history as normal from there.
 
@@ -51,7 +51,7 @@ The bleeding-edge way:
 
     branches:
       -B, --branches      list all branches
-      -b, --branch ID     show messages from a specific non-default branch
+      -b ID, --branch ID  show messages from a specific non-default branch
       -A, --all-branches  show messages from all branches tagged with branch IDs
 
     filters:
@@ -65,7 +65,7 @@ The bleeding-edge way:
 
 #### Claude.ai
 
-    $ claude2md ~/.local/share/claude-backup/f50d0792-fa79-4d2d-a945-c8f709e9e7a7/c6a33008-39b3-45ed-a00e-413141c89a90.json | head -n20
+    $ claude2md -uat ~/.local/share/claude-backup/f50d0792-fa79-4d2d-a945-c8f709e9e7a7/c6a33008-39b3-45ed-a00e-413141c89a90.json | head -n20
     # Python packaging complexity
 
     > why is python packaging such a clusterfuck? ultrathink
