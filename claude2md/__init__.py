@@ -10,16 +10,62 @@ from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
+from itertools import groupby
 from json import JSONDecodeError
-from uuid import UUID
+from typing import IO, Any
 
 import argparse
+import io
 import json
 import os
 import re
 import sys
 
-NULL_UUID = "00000000-0000-4000-8000-000000000000"
+
+class PrefixWriter(IO[str]):
+    def __init__(self, file: IO[str], prefix: str):
+        self.file = file
+        self.prefix = prefix
+        self.empty = True
+        self.needs_prefix = True
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        self.empty = False
+        n = len(s)
+        while s:
+            if self.needs_prefix:
+                self.file.write(self.prefix)
+                self.needs_prefix = False
+            i = s.find("\n")
+            if i < 0:
+                self.file.write(s)
+                return n
+            self.file.write(s[: i + 1])
+            self.needs_prefix = True
+            s = s[i + 1 :]
+        return n
+
+
+class NewlineWriter(IO[str]):
+    def __init__(self, file: IO[str]):
+        self.file = file
+        self.needs_blank = True
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        if self.needs_blank:
+            self.file.write("\n")
+            self.needs_blank = False
+        return self.file.write(s)
 
 
 class Role(Enum):
@@ -27,7 +73,7 @@ class Role(Enum):
     ASSISTANT = "assistant"
 
     @classmethod
-    def from_json(cls, value):
+    def from_json(cls, value: str) -> "Role":
         match value:
             case "user" | "human":
                 return cls.USER
@@ -43,30 +89,33 @@ class Block:
     content: str
 
     @classmethod
-    def from_json(cls, obj):
+    def from_json(cls, obj: dict[str, Any]) -> "Block | None":
         match obj["type"]:
             case "text":
-                return cls("text", obj["text"])
+                if content := obj["text"].strip():
+                    return cls("text", content)
             case "thinking":
-                return cls("thinking", obj["thinking"])
+                if content := obj["thinking"].strip():
+                    return cls("thinking", content)
             case "token_budget" | "tool_result" | "tool_use" | "voice_note":
-                return None
+                pass
             case block_type:
                 raise NotImplementedError(f'Unsupported block type "{block_type}"')
+        return None
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True, frozen=True, eq=False)
 class Message:
-    uuid: str
-    parent: str | None
+    parent: "Message | None"
     role: Role
     blocks: list[Block]
-    attachments: list
+    attachments: list[dict[str, Any]]
 
     @classmethod
-    def from_json(cls, data):
-        content = data.get("message", {}).get("content") or data.get("content")
-        if not content:
+    def from_json(cls, data: dict[str, Any], parent: "Message | None") -> "Message":
+        if (content := data.get("message", {}).get("content", None)) is None and (
+            content := data.get("content", None)
+        ) is None:
             raise KeyError("No content field found in message data")
 
         if isinstance(content, str):
@@ -77,213 +126,205 @@ class Message:
             ]
         else:
             blocks = []
-        parent = data.get("parentUuid") or data.get("parent_message_uuid")
-        if parent == NULL_UUID:
-            parent = None
 
-        role_value = data.get("message", {}).get("role") or data.get("sender")
-        if not role_value:
+        if (role_value := data.get("message", {}).get("role", None)) is None and (
+            role_value := data.get("sender", None)
+        ) is None:
             raise KeyError("No role field found in message data")
 
         return cls(
-            uuid=data["uuid"],
             parent=parent,
             role=Role.from_json(role_value),
             blocks=blocks,
             attachments=data.get("attachments", []),
         )
 
-    def render(self, thinking=True, prefix=""):
-        parts = []
-
+    def preview(self) -> str:
         if self.role == Role.USER:
-            if self.attachments:
-                lines = ["<documents>"]
-                for index, attachment in enumerate(self.attachments, 1):
-                    file_name = attachment.get("file_name")
-                    file_type = attachment.get("file_type")
-                    extracted = attachment["extracted_content"]
-
-                    doc = f'<document index="{index}"'
-                    if file_type:
-                        doc += f' media_type="{file_type}"'
-                    doc += ">"
-                    if file_name:
-                        doc += f"<source>{file_name}</source>"
-                    doc += (
-                        f"<document_content>{extracted}</document_content></document>"
-                    )
-                    lines.append(doc)
-                lines.append("</documents>")
-                parts.append("\n".join(lines))
-
             for block in self.blocks:
-                parts.append(block.content)
+                if block.type == "text":
+                    return block.content
+        return self.parent.preview() if self.parent else ""
 
-            return f"\n{prefix}> \n".join(
-                re.sub(r"^", f"{prefix}> ", p, flags=re.MULTILINE) for p in parts
-            )
+    def render(
+        self,
+        user: bool = True,
+        assistant: bool = True,
+        thinking: bool = True,
+        file: IO[str] = sys.stdout,
+        parents: bool = True,
+        first: bool = True,
+    ) -> bool:
+        if parents and self.parent:
+            first = self.parent.render(user, assistant, thinking, file, parents, first)
 
-        elif self.role == Role.ASSISTANT:
-            for block in self.blocks:
-                if block.type == "thinking" and not thinking:
-                    continue
-                if block.type == "thinking":
-                    parts.append(f"<thinking>\n{block.content}\n</thinking>")
-                else:
-                    parts.append(block.content)
+        match self.role:
+            case Role.USER:
+                if user:
+                    out = PrefixWriter(file if first else NewlineWriter(file), "> ")
+                    first = False
 
-            return f"\n{prefix}\n".join(
-                re.sub(r"^", prefix, p, flags=re.MULTILINE) for p in parts
-            )
+                    if self.attachments:
+                        out.write("<documents>\n")
 
-        return ""
+                        for index, attachment in enumerate(self.attachments, 1):
+                            file_name = attachment.get("file_name")
+                            file_type = attachment.get("file_type")
+
+                            out.write(f'<document index="{index}"')
+                            if file_type:
+                                out.write(f' media_type="{file_type}"')
+                            out.write(">")
+
+                            if file_name:
+                                out.write(f"<source>{file_name}</source>")
+
+                            out.write("<document_content>")
+                            out.write(attachment["extracted_content"])
+                            out.write("</document_content></document>\n")
+
+                        out.write("</documents>\n")
+
+                    for block in self.blocks:
+                        out.write(block.content)
+                        out.write("\n")
+            case Role.ASSISTANT:
+                for block_type, group in groupby(self.blocks, key=lambda b: b.type):
+                    out = file if first else NewlineWriter(file)
+                    if thinking and block_type == "thinking":
+                        out.write("<thinking>")
+
+                        for b in group:
+                            out.write("\n")
+                            out.write(b.content)
+                            out.write("\n")
+
+                        out.write("</thinking>")
+                    elif assistant and block_type == "text":
+                        for b in group:
+                            out.write(b.content)
+                    else:
+                        continue
+
+                    out.write("\n")
+                    first = False
+
+        return first
 
 
 @dataclass(slots=True)
 class Chat:
-    file: object
+    file: IO[str]
 
-    messages: dict = field(init=False, default_factory=dict)
-    metadata: dict = field(init=False, default_factory=dict)
-    leaves: dict = field(init=False, default_factory=dict)
+    name: str | None = field(init=False, default=None)
+    messages: list[Message] = field(init=False, default_factory=list)
+    branches: dict[Message, int] = field(init=False, default_factory=dict)
+    branch: Message | None = field(init=False, default=None)
 
     def __post_init__(self):
+        by_uuid = {}
+
+        def add_message(data: dict[str, Any]) -> None:
+            parent_uuid = data.get("parentUuid") or data.get("parent_message_uuid")
+            msg = by_uuid[data["uuid"]] = Message.from_json(
+                data,
+                by_uuid.get(parent_uuid),
+            )
+            self.messages.append(msg)
+
+            self.branches[msg] = len(self.messages) - 1
+            if msg.parent is not None:
+                self.branches.pop(msg.parent, None)
+
         unparsed = self.file.read()
 
         try:
             parsed = json.loads(unparsed)
-            for msg_data in parsed["chat_messages"]:
-                msg = Message.from_json(msg_data)
-                self.messages[msg.uuid] = msg
-            self.metadata = parsed
+            self.name = parsed.get("name")
+            for raw in parsed["chat_messages"]:
+                add_message(raw)
+            if branch := parsed.get("current_leaf_message_uuid"):
+                self.branch = by_uuid[branch]
         except (JSONDecodeError, KeyError, TypeError):
             for line in unparsed.split("\n"):
                 with suppress(JSONDecodeError, KeyError, TypeError):
-                    msg = Message.from_json(json.loads(line))
-                    self.messages[msg.uuid] = msg
+                    d = json.loads(line)
+                    if isinstance(d, dict):
+                        add_message(d)
 
-        all_parents = {msg.parent for msg in self.messages.values() if msg.parent}
-        self.leaves = {
-            uuid: msg for uuid, msg in self.messages.items() if uuid not in all_parents
-        }
+        if not self.branch and len(self.branches) == 1:
+            self.branch = next(iter(self.branches))
 
-    def print_message(self, msg, user=True, assistant=True, thinking=False, prefix=""):
-        if msg.role == Role.USER and not user:
-            return
-        if msg.role == Role.ASSISTANT and not assistant:
-            return
-        rendered = msg.render(thinking=thinking, prefix=prefix)
-        if rendered:
-            print(rendered)
-            print(prefix)
+    def print_branches(self, file: IO[str] = sys.stdout) -> None:
+        width = 72
+        if file.isatty():
+            with suppress(AttributeError, OSError):
+                width = max(20, os.get_terminal_size(file.fileno()).columns - 8)
 
-    def print_title(self, title, prefix=""):
-        if not title:
-            return
-        chat_name = self.metadata.get("name")
-        if title is True:
-            title_text = chat_name or "Untitled"
-            print(f"{prefix}# {title_text}\n{prefix}")
-        elif chat_name:
-            print(f"{prefix}# {chat_name}\n{prefix}")
+        for msg in self.branches:
+            preview = re.sub(r"\s+", " ", msg.preview()).strip()
+            if len(preview) > width:
+                preview = preview[: width - 1] + "…"
 
-    def print_branch(self, msg, user=True, assistant=True, thinking=False):
-        if msg.parent is not None:
-            self.print_branch(self.messages[msg.parent], user, assistant, thinking)
-        self.print_message(msg, user, assistant, thinking)
+            print(f"{self.branches[msg]:x}\t{preview}", file=file)
 
-    def print_all(self, user=True, assistant=True, thinking=False):
+    def print_branch(
+        self,
+        msg: Message,
+        user: bool = True,
+        assistant: bool = True,
+        thinking: bool = True,
+        name: bool | None = None,
+    ) -> None:
+        title = name or (name is None and self.name)
+        if title:
+            print(f"# {self.name or 'Untitled'}")
+        msg.render(user, assistant, thinking, first=not title)
+
+    def print_all(
+        self,
+        user: bool = True,
+        assistant: bool = True,
+        thinking: bool = False,
+        name: bool | None = None,
+    ) -> None:
+        title = name or (name is None and self.name)
+        if title:
+            prefix = ",".join(f"{i:x}" for i in self.branches.values()) + "\t"
+            print(f"{prefix}# {self.name or 'Untitled'}")
+
         descendants = defaultdict(list)
 
-        def walk(msg, leaf):
-            if msg.parent is not None:
-                walk(self.messages[msg.parent], leaf)
-            descendants[msg.uuid].append(leaf)
+        def walk(msg: Message, branch: Message) -> None:
+            if msg.parent:
+                walk(msg.parent, branch)
+            descendants[msg].append(branch)
 
-        for leaf, msg in self.leaves.items():
-            walk(msg, leaf)
+        for branch in self.branches:
+            walk(branch, branch)
 
-        for uuid, leaves in descendants.items():
-            prefix = ",".join(leaves) + "\t"
-            self.print_message(self.messages[uuid], user, assistant, thinking, prefix)
-
-    def print_leaves(self, uuids=None, file=None):
-        if uuids is None:
-            uuids = self.leaves
-
-        width = 80
-        if sys.stdout.isatty():
-            with suppress(AttributeError, OSError):
-                width = os.get_terminal_size().columns
-        preview_len = max(20, width - 36 - 4)
-
-        for uuid in uuids:
-            current = uuid
-            preview = ""
-
-            while current:
-                msg = self.messages[current]
-                if msg.role == Role.USER:
-                    for block in msg.blocks:
-                        if block.type == "text":
-                            preview = block.content
-                            break
-                    if preview:
-                        break
-                current = msg.parent
-
-            if preview:
-                preview = preview.replace("\n", " ").replace("\r", " ")
-                preview = " ".join(preview.split())
-                if len(preview) > preview_len:
-                    preview = preview[: preview_len - 1] + "…"
-            else:
-                preview = ""
-
-            print(f"{uuid}\t{preview}", file=file)
-
-    def get_leaf(self, prefix=""):
-        with suppress(ValueError):
-            return self.messages[str(UUID(prefix))]
-
-        matches = [
-            (uuid, msg) for uuid, msg in self.leaves.items() if uuid.startswith(prefix)
-        ]
-
-        match matches:
-            case []:
-                print(f'Error: No leaf matches prefix "{prefix}"', file=sys.stderr)
-                return None
-            case [(_, single)]:
-                return single
-            case multiple:
-                print(
-                    f'Error: Multiple leaves match prefix "{prefix}":',
-                    file=sys.stderr,
-                )
-                self.print_leaves((u for u, _ in multiple), file=sys.stderr)
-                return None
+        first = not title
+        for msg in self.messages:
+            prefix = ",".join(f"{self.branches[b]:x}" for b in descendants[msg]) + "\t"
+            first = msg.render(
+                user,
+                assistant,
+                thinking,
+                PrefixWriter(sys.stdout, prefix),
+                False,
+                first,
+            )
 
 
-class _HelpFormatter(argparse.HelpFormatter):
-    def __init__(self, prog):
-        super().__init__(prog, max_help_position=float("inf"))
-
-    def _format_action_invocation(self, action):
-        if not action.option_strings or action.nargs == 0:
-            return super()._format_action_invocation(action)
-        default = self._get_default_metavar_for_optional(action)
-        args_string = self._format_args(action, default)
-        return ", ".join(action.option_strings) + " " + args_string
-
-
-def main():
+def main() -> None:
     sys.setrecursionlimit(100_000)  # lol
+
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
 
     parser = argparse.ArgumentParser(
         description="Convert Claude.ai or Claude Code chats to Markdown",
-        formatter_class=_HelpFormatter,
     )
     parser.add_argument(
         "-v",
@@ -294,94 +335,97 @@ def main():
     parser.add_argument(
         "file",
         nargs="?",
-        type=argparse.FileType("r"),
+        type=argparse.FileType("r", encoding="utf-8"),
         default=sys.stdin,
         help="JSON file to convert (default: stdin)",
     )
 
-    nav_group = parser.add_mutually_exclusive_group()
+    branches_group = parser.add_argument_group("branches")
+    nav_group = branches_group.add_mutually_exclusive_group()
     nav_group.add_argument(
+        "-B",
         "--branches",
-        dest="leaves",
         action="store_true",
-        help="List all branch message UUIDs",
+        help="list all branches",
     )
     nav_group.add_argument(
         "-b",
         "--branch",
-        dest="leaf",
-        metavar="UUID|ALL",
-        help="Show chain to specific branch",
+        metavar="ID",
+        help="show messages from a specific non-default branch",
+    )
+    nav_group.add_argument(
+        "-A",
+        "--all-branches",
+        action="store_true",
+        help="show messages from all branches tagged with branch IDs",
     )
 
-    parser.add_argument(
-        "-u",
-        "--user",
-        dest="user",
-        action="store_true",
-        default=True,
-        help="Show user messages (default)",
-    )
-    parser.add_argument(
-        "--no-user", dest="user", action="store_false", help="Hide user messages"
-    )
-    parser.add_argument(
-        "--human", dest="user", action="store_true", help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--no-human", dest="user", action="store_false", help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "-a",
-        "--assistant",
-        dest="assistant",
-        action="store_true",
-        default=True,
-        help="Show assistant (default)",
-    )
-    parser.add_argument(
-        "--no-assistant", dest="assistant", action="store_false", help="Hide assistant"
-    )
-    parser.add_argument(
-        "-t",
-        "--thinking",
-        dest="thinking",
-        action="store_true",
-        default=False,
-        help="Show thinking blocks",
-    )
-    parser.add_argument(
-        "--no-thinking",
-        dest="thinking",
-        action="store_false",
-        help="Hide thinking (default)",
-    )
-    parser.add_argument(
-        "--title",
-        dest="title",
+    filters_group = parser.add_argument_group("filters")
+    filters_group.add_argument(
+        "-n",
+        "--name",
         action="store_true",
         default=None,
-        help='Always show title (or "Untitled" if none)',
+        help='always show chat name (or "Untitled" if none)',
     )
-    parser.add_argument(
-        "--no-title", dest="title", action="store_false", help="Never show title"
+    filters_group.add_argument(
+        "-N",
+        "--no-name",
+        dest="name",
+        action="store_false",
+        help="never show chat name",
+    )
+    filters_group.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        default=None,
+        help="show user messages",
+    )
+    filters_group.add_argument(
+        "-a",
+        "--assistant",
+        action="store_true",
+        default=None,
+        help="show assistant messages",
+    )
+    filters_group.add_argument(
+        "-t",
+        "--thinking",
+        action="store_true",
+        default=None,
+        help="show thinking blocks",
     )
     args = parser.parse_args()
 
+    if args.user is args.assistant is args.thinking is None:
+        args.user, args.assistant, args.thinking = True, True, False
+
     chat = Chat(args.file)
 
-    if args.leaves:
-        chat.print_leaves()
-    elif args.leaf == "ALL":
-        chat.print_title(args.title, prefix=",".join(chat.leaves) + "\t")
-        chat.print_all(args.user, args.assistant, args.thinking)
-    elif msg := (
-        (args.leaf and chat.get_leaf(args.leaf))
-        or chat.messages.get(chat.metadata.get("current_leaf_message_uuid", ""))
-        or chat.get_leaf()
-    ):
-        chat.print_title(args.title)
-        chat.print_branch(msg, args.user, args.assistant, args.thinking)
+    if args.branches:
+        chat.print_branches()
+    elif args.all_branches:
+        chat.print_all(args.user, args.assistant, args.thinking, args.name)
+    else:
+        if args.branch:
+            try:
+                branch = chat.messages[int(args.branch, 16)]
+            except (ValueError, IndexError):
+                print(f'Error: "{args.branch}" is not a branch ID', file=sys.stderr)
+                chat.print_branches(file=sys.stderr)
+                sys.exit(1)
+        elif chat.branch:
+            branch = chat.branch
+        else:
+            print(
+                "Error: Multiple branches; specify with --branch <id>", file=sys.stderr
+            )
+            chat.print_branches(file=sys.stderr)
+            sys.exit(1)
+
+        chat.print_branch(branch, args.user, args.assistant, args.thinking, args.name)
 
 
 if __name__ == "__main__":
