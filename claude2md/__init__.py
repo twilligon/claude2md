@@ -4,7 +4,7 @@
 
 """Convert Claude.ai or Claude Code chats to Markdown"""
 
-__version__ = "0.5"
+__version__ = "0.5.1"
 
 from collections import defaultdict
 from contextlib import suppress
