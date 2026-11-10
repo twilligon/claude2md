@@ -8,6 +8,7 @@ from tempfile import NamedTemporaryFile
 from typing import IO, Any, BinaryIO, Callable, Iterable, Iterator
 
 import base64
+import difflib
 import io
 import json
 import math
@@ -180,6 +181,7 @@ NAME_XLAT = {c: ord("_") for c in [*range(32), *map(ord, '<>:"/\\|?*#')]}
 JS_SPACE = set(" \f\n\r\t\v\u00a0\u1680\u2028\u2029\u202f\u205f\u3000\ufeff") | {
     chr(c) for c in range(0x2000, 0x200B)
 }
+HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def mention(path: str) -> str:
@@ -190,6 +192,25 @@ def mention(path: str) -> str:
 
 def stamp(when: datetime) -> str:
     return when.astimezone(UTC).isoformat(timespec="milliseconds")[:-6] + "Z"
+
+
+def hunks(old: str, new: str) -> list[dict[str, Any]]:
+    patch: list[dict[str, Any]] = []
+    for line in difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm=""):
+        if m := HUNK.match(line):
+            old_start, old_len, new_start, new_len = (int(x or 1) for x in m.groups())
+            patch.append(
+                {
+                    "oldStart": old_start + (old_len == 0),
+                    "oldLines": old_len,
+                    "newStart": new_start + (new_len == 0),
+                    "newLines": new_len,
+                    "lines": [],
+                }
+            )
+        elif patch and line[:1] in ("+", "-", " "):
+            patch[-1]["lines"].append(line)
+    return patch
 
 
 def claude_code_call(use: ToolUse) -> ToolUse:
@@ -228,6 +249,34 @@ def questions(input: dict[str, Any]) -> dict[str, Any] | None:
             }
         )
     return {"questions": out}
+
+
+def kept(result: ToolResult, call: ToolUse) -> Any:
+    text = result.text
+    if result.is_error:
+        return f"Error: {text}"
+    match call.name:
+        case "Bash":
+            return {
+                "stdout": text,
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            }
+        case "Edit":
+            old, new = call.input["old_string"], call.input["new_string"]
+            return {
+                "filePath": call.input["file_path"],
+                "oldString": old,
+                "newString": new,
+                "originalFile": None,
+                "structuredPatch": hunks(old, new),
+                "userModified": False,
+                "replaceAll": call.input.get("replace_all") in (True, "true"),
+            }
+        case "ListAgents":
+            return {"listing": text}
+    return text
 
 
 def base64_of(path: Path) -> str:
@@ -559,7 +608,7 @@ class Session:
                 }
                 block = {"type": "image", "source": source}
                 return [block], {"type": "image", "file": stored}
-        stored = result.text
+        stored = kept(result, call)
         match result.content:
             case [SearchResult(body=body)] if call.name == "WebFetch" and body:
                 return body, stored
