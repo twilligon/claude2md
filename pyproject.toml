@@ -11,6 +11,7 @@ authors = [{name = "Ultrathinkers Anonymous", email = "ultrathink@twilligon.com"
 keywords = ["claude", "markdown", "chat", "export", "converter"]
 dependencies = [
     "claude-backup>=0.1.17",
+    "pillow>=10.1",
     "platformdirs",
 ]
 classifiers = [
@@ -27,6 +28,7 @@ dynamic = ["version", "description"]
 
 [project.scripts]
 claude2md = "claude2md.cli:to_markdown"
+claude2code = "claude2md.cli:to_claude_code"
 
 [project.urls]
 Repository = "https://github.com/twilligon/claude2md"
