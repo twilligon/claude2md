@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from itertools import groupby
 from typing import IO
 
+import html
 import sys
 
 from claude2md.chat import Block, Chat, Message, Role
@@ -39,31 +40,36 @@ class Options:
     thinking: bool = True
 
 
+def lines(text: str) -> int:
+    return text.count("\n") + (text[-1:] not in ("", "\n"))
+
+
+def size(n: int) -> str:
+    if n < 1000:
+        return f"{n} B"
+    if n < 1_000_000:
+        return f"{n / 1000:.2f} kB"
+    return f"{n / 1_000_000:.2f} MB"
+
+
 def render(msg: Message, writer: Writer, options: Options, prefix: str = "") -> None:
     match msg.role:
         case Role.USER if options.user:
             writer.section(prefix, "> ")
 
-            if msg.attachments:
-                writer.write("<documents>\n")
-
-                for index, attachment in enumerate(msg.attachments, 1):
-                    file_name = attachment.get("file_name")
-                    file_type = attachment.get("file_type")
-
-                    writer.write(f'<document index="{index}"')
-                    if file_type:
-                        writer.write(f' media_type="{file_type}"')
-                    writer.write(">")
-
-                    if file_name:
-                        writer.write(f"<source>{file_name}</source>")
-
-                    writer.write("<document_content>")
-                    writer.write(attachment["extracted_content"])
-                    writer.write("</document_content></document>\n")
-
-                writer.write("</documents>\n")
+            for attachment in msg.attachments:
+                name = attachment.get("file_name")
+                text = attachment["extracted_content"]
+                n = lines(text)
+                summary = (
+                    f"<code>{html.escape(name, quote=False)}</code>"
+                    if name
+                    else "Pasted content"
+                )
+                summary += f" ({n} line{'s' * (n != 1)}, {size(len(text.encode()))})"
+                writer.write(f"<details>\n<summary>{summary}</summary>\n\n")
+                writer.write(text)
+                writer.write(("" if text.endswith("\n") else "\n") + "\n</details>\n")
 
             for block in msg.blocks:
                 if isinstance(block, Block):
