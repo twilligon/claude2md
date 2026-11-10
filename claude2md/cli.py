@@ -9,13 +9,13 @@ import sys
 from claude_backup import ChatsEntry, Nameable, Organization
 
 from claude2md import __version__, claude_ai, claude_code, markdown
-from claude2md.backup import chat_file, find_chats
+from claude2md.backup import Backup, chat_file, find_chats, uploads_dirs
 from claude2md.chat import Chat, Event, Message
 
 
-def read(file: IO[str]) -> Chat:
+def read(file: IO[str], lossy: bool = False) -> Chat:
     text = file.read()
-    return claude_ai.read(text) or claude_code.read(text)
+    return claude_ai.read(text, lossy) or claude_code.read(text, lossy)
 
 
 def print_rows(rows: Iterable[tuple[list[str], Event | None]], file: IO[str]) -> None:
@@ -34,7 +34,9 @@ def print_branches(chat: Chat, file: IO[str] = sys.stdout) -> None:
     print_rows(rows, file)
 
 
-def print_chats(chats: list[ChatsEntry], file: IO[str] = sys.stdout) -> None:
+def print_chats(
+    chats: list[ChatsEntry], file: IO[str] = sys.stdout, lossy: bool = False
+) -> None:
     def name(saved: Nameable) -> str:
         return saved.name or saved.uuid
 
@@ -45,7 +47,8 @@ def print_chats(chats: list[ChatsEntry], file: IO[str] = sys.stdout) -> None:
         return [name(organization.account), name(organization)]
 
     def branch(entry: ChatsEntry) -> Event | None:
-        chat = claude_ai.read(chat_file(entry).read_text(encoding="utf-8"))
+        text = chat_file(entry).read_text(encoding="utf-8")
+        chat = claude_ai.read(text, lossy=lossy)
         return chat.branch if chat else None
 
     columns = [[entry.uuid for entry in chats], *zip(*map(saved_under, chats))]
@@ -53,7 +56,7 @@ def print_chats(chats: list[ChatsEntry], file: IO[str] = sys.stdout) -> None:
     print_rows(zip(map(list, zip(*shown)), map(branch, chats)), file)
 
 
-def select_chat(query: str) -> str:
+def select_chat(query: str, lossy: bool = False) -> str:
     chats = find_chats(query)
     if len(chats) == 1:
         return str(chat_file(chats[0]))
@@ -62,7 +65,7 @@ def select_chat(query: str) -> str:
             f'Error: Multiple saved chats match "{query}"; specify one by its ID',
             file=sys.stderr,
         )
-        print_chats(chats, sys.stderr)
+        print_chats(chats, sys.stderr, lossy)
     else:
         print(f'Error: "{query}" is neither a file nor a saved chat', file=sys.stderr)
     sys.exit(1)
@@ -92,6 +95,25 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default="-",
         help="chat JSON, UUID, name, or URL (default: stdin)",
+    )
+    parser.add_argument(
+        "-e",
+        "--embed",
+        action="store_true",
+        default=None,
+        help="embed media as data URLs",
+    )
+    parser.add_argument(
+        "-E",
+        "--no-embed",
+        dest="embed",
+        action="store_false",
+        help="link text attachments like media",
+    )
+    parser.add_argument(
+        "--lossy",
+        action="store_true",
+        help="make do without what's missing or unsupported",
     )
 
     branches = parser.add_argument_group("branches").add_mutually_exclusive_group()
@@ -163,23 +185,29 @@ def to_markdown() -> None:
 
     path = args.chat
     if path != "-" and not os.path.exists(path):
-        path = select_chat(path)
+        path = select_chat(path, args.lossy)
     try:
         with sys.stdin if path == "-" else open(path, encoding="utf-8") as file:
-            chat = read(file)
+            chat = read(file, args.lossy)
     except OSError as e:
         sys.exit(f"Error: {e}")
     except ValueError as e:
         parser.error(str(e))
+    backup = Backup(uploads_dirs(file.name), args.lossy)
 
-    if args.branches:
-        print_branches(chat)
-    else:
-        if args.user is args.assistant is args.thinking is None:
-            args.user, args.assistant, args.thinking = True, True, False
-        options = markdown.Options(args.user, args.assistant, args.thinking)
-        if args.all_branches:
-            markdown.write_all(chat, options, args.name)
+    try:
+        if args.branches:
+            print_branches(chat)
         else:
-            leaf = select_branch(chat, args.branch)
-            markdown.write_branch(chat, leaf, options, args.name)
+            if args.user is args.assistant is args.thinking is None:
+                args.user, args.assistant, args.thinking = True, True, False
+            options = markdown.Options(
+                args.user, args.assistant, args.thinking, args.embed
+            )
+            if args.all_branches:
+                markdown.write_all(chat, backup, options, args.name)
+            else:
+                leaf = select_branch(chat, args.branch)
+                markdown.write_branch(chat, leaf, backup, options, args.name)
+    except OSError as e:
+        sys.exit(f"Error: {e}")

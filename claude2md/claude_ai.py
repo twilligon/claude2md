@@ -2,31 +2,44 @@ from json import JSONDecodeError
 from typing import Any
 
 import json
+import sys
 
-from claude2md.chat import Block, Chat, Message, Role, ToolResult, ToolUse, oneline
+from claude2md.chat import (
+    Attachment,
+    Block,
+    Chat,
+    File,
+    Message,
+    Role,
+    ToolResult,
+    ToolUse,
+    oneline,
+)
 
 ROLES = {"human": Role.USER, "assistant": Role.ASSISTANT}
 
 
-def read(text: str) -> Chat | None:
+def read(text: str, lossy: bool = False) -> Chat | None:
     try:
         export = json.loads(text)
     except JSONDecodeError:
         return None
     if not isinstance(export, dict) or "chat_messages" not in export:
         return None
-    return parse(export)
+    return parse(export, lossy)
 
 
-def parse(export: dict[str, Any]) -> Chat:
+def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
     by_uuid: dict[str, Message] = {}
     for data in export["chat_messages"]:
+        pasted = attachments(data)
         parent = by_uuid.get(data["parent_message_uuid"])
         by_uuid[data["uuid"]] = Message(
             parent=parent,
             role=ROLES[data["sender"]],
-            blocks=parse_content(data["content"]),
-            attachments=data.get("attachments", []),
+            blocks=parse_content(data["content"], lossy),
+            attachments=pasted,
+            files=files(data, {a.id for a in pasted}),
         )
     return Chat(
         list(by_uuid.values()),
@@ -35,7 +48,55 @@ def parse(export: dict[str, Any]) -> Chat:
     )
 
 
-def parse_block(obj: dict[str, Any]) -> Block | ToolUse | None:
+def attachments(data: dict[str, Any]) -> list[Attachment]:
+    pasted = data.get("attachments", [])
+    listed = data.get("files") or []
+    return [
+        Attachment(
+            a.get("file_name"),
+            a.get("file_type"),
+            (
+                a["id"]
+                if "id" in a
+                else listed[len(listed) - len(pasted) + n]["file_uuid"]
+            ),
+            a.get("extracted_content"),
+        )
+        for n, a in enumerate(pasted)
+    ]
+
+
+def files(data: dict[str, Any], pasted: set[str]) -> list[File]:
+    listed = (data.get("files_v2") or []) + (data.get("files") or [])
+    listed += [
+        {"file_kind": "image", "file_uuid": b["file_uuid"]}
+        for b in data["content"]
+        if b["type"] == "image"
+    ]
+    previews = {
+        f["file_uuid"]: (preview["image_width"], preview["image_height"])
+        for f in listed
+        if "image_width" in (preview := f.get("preview_asset") or {})
+    }
+    files: dict[str, File] = {}
+    for f in listed:
+        id = f["file_uuid"]
+        if id in pasted:
+            continue
+        file = File(
+            f.get("file_name") or "", f.get("file_kind"), id, preview=previews.get(id)
+        )
+        files.setdefault(file.id, file)
+    return list(files.values())
+
+
+def unsupported(what: str, lossy: bool) -> None:
+    if not lossy:
+        raise NotImplementedError(f"Unsupported {what} (--lossy skips it)")
+    print(f"lossy: unsupported {what}", file=sys.stderr)
+
+
+def parse_block(obj: dict[str, Any], lossy: bool = False) -> Block | ToolUse | None:
     match obj["type"]:
         case "text":
             if content := obj["text"].strip():
@@ -58,11 +119,13 @@ def parse_block(obj: dict[str, Any]) -> Block | ToolUse | None:
         ):
             pass
         case block_type:
-            raise NotImplementedError(f'Unsupported block type "{block_type}"')
+            unsupported(f'block type "{block_type}"', lossy)
     return None
 
 
-def parse_content(content: list[dict[str, Any]]) -> list[Block | ToolUse | ToolResult]:
+def parse_content(
+    content: list[dict[str, Any]], lossy: bool = False
+) -> list[Block | ToolUse | ToolResult]:
     blocks: list[Block | ToolUse | ToolResult] = []
     unanswered: list[ToolUse] = []
     for obj in content:
@@ -71,7 +134,7 @@ def parse_content(content: list[dict[str, Any]]) -> list[Block | ToolUse | ToolR
             if use := next((u for u in unanswered if wanted in (None, u.id)), None):
                 unanswered.remove(use)
                 blocks.append(ToolResult(use))
-        elif block := parse_block(obj):
+        elif block := parse_block(obj, lossy):
             blocks.append(block)
             if isinstance(block, ToolUse):
                 unanswered.append(block)

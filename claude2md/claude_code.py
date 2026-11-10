@@ -8,16 +8,16 @@ from claude2md.chat import Block, Chat, Event, Message, Role
 from claude2md.claude_ai import parse_content
 
 
-def read(text: str) -> Chat:
+def read(text: str, lossy: bool = False) -> Chat:
     records = []
     for line in text.split("\n"):
         with suppress(JSONDecodeError):
             if isinstance(record := json.loads(line), dict):
                 records.append(record)
-    return parse(records)
+    return parse(records, lossy)
 
 
-def parse(records: Iterable[dict[str, Any]]) -> Chat:
+def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
     by_uuid: dict[str, Event] = {}
     messages: list[Message] = []
     turn: list[dict[str, Any]] = []
@@ -26,7 +26,7 @@ def parse(records: Iterable[dict[str, Any]]) -> Chat:
     def flush() -> None:
         nonlocal turn
         if turn:
-            message = assistant(turn, by_uuid.get(turn[0].get("parentUuid")))
+            message = assistant(turn, by_uuid.get(turn[0].get("parentUuid")), lossy)
             messages.append(message)
             for data in turn:
                 by_uuid[data["uuid"]] = message
@@ -46,7 +46,7 @@ def parse(records: Iterable[dict[str, Any]]) -> Chat:
             parent = by_uuid.get(
                 data.get("parentUuid") or data.get("logicalParentUuid")
             )
-            event = user(data, parent) or Event(parent)
+            event = user(data, parent, lossy) or Event(parent)
             by_uuid[data["uuid"]] = event
             if isinstance(event, Message):
                 messages.append(event)
@@ -66,7 +66,9 @@ def is_results(data: dict[str, Any]) -> bool:
     )
 
 
-def user(data: dict[str, Any], parent: Event | None) -> Message | None:
+def user(
+    data: dict[str, Any], parent: Event | None, lossy: bool = False
+) -> Message | None:
     if data.get("type") != "user" or data.get("isMeta") or data.get("isCompactSummary"):
         return None
     api = data.get("message")
@@ -75,16 +77,18 @@ def user(data: dict[str, Any], parent: Event | None) -> Message | None:
     if isinstance(content, str):
         blocks = [Block("text", content)]
     else:
-        blocks = parse_content(content)
+        blocks = parse_content(content, lossy=lossy)
     return Message(parent, Role.USER, blocks)
 
 
-def assistant(turn: list[dict[str, Any]], parent: Event | None) -> Message:
+def assistant(
+    turn: list[dict[str, Any]], parent: Event | None, lossy: bool = False
+) -> Message:
     content: list[dict[str, Any]] = []
     for data in turn:
         api = data.get("message")
         if not isinstance(api, dict) or not isinstance(api.get("content"), list):
             continue
         content += api["content"]
-    blocks = parse_content(content)
+    blocks = parse_content(content, lossy)
     return Message(parent, Role.ASSISTANT, blocks)
