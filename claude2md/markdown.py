@@ -96,7 +96,7 @@ def size(n: int) -> str:
 def facts(
     file: File, backup: Backup, path: Path, probed: tuple[str | None, int] | None
 ) -> list[str]:
-    about: list[str] = []
+    about = [count(file.pages, "page")] if file.pages else []
     if file.preview:
         about.append(f"{file.preview[0]}x{file.preview[1]}")
     if probed is not None and probed[0] is None:
