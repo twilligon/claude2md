@@ -49,6 +49,7 @@ def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
             role=ROLES[data["sender"]],
             blocks=parse_content(content, partial(results, lossy=lossy), times, lossy),
             created_at=datetime.fromisoformat(data["created_at"]),
+            started_at=began(data, content),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
             fallback=fallback if data["uuid"] == flagged else None,
@@ -121,6 +122,10 @@ def span(
         for key in ("start_timestamp", "stop_timestamp")
     )
     return (None, None) if start == stop == saved else (start, stop)
+
+
+def began(data: dict[str, Any], content: list[dict[str, Any]]) -> datetime | None:
+    return min((start for b in content if (start := span(b, data)[0])), default=None)
 
 
 def done(data: dict[str, Any]) -> list[datetime | None]:
