@@ -16,6 +16,7 @@ import mimetypes
 import os
 import re
 import shutil
+import subprocess
 import uuid
 
 from PIL import Image, ImageOps
@@ -368,6 +369,22 @@ def recode(
     return data, original, image.size
 
 
+def pdf_pages(pdf: BinaryIO, pages: str) -> Iterator[Image.Image]:
+    first, dash, last = pages.partition("-")
+    first, last = int(first), int(last if dash else first)
+    with subprocess.Popen(
+        ["pdftoppm", "-r", "100", "-f", str(first), "-l", str(last)],
+        stdin=pdf,
+        stdout=subprocess.PIPE,
+    ) as render:
+        out = render.stdout
+        assert out
+        while out.readline():
+            width, height = map(int, out.readline().split())
+            out.readline()
+            yield Image.frombytes("RGB", (width, height), out.read(width * height * 3))
+
+
 def lossy(webp: Callable[..., bytes]) -> bytes:
     fit, unfit = -1, 101
     quality, data = FIRST_QUALITY, b""
@@ -496,6 +513,7 @@ class Session:
     last: str | None = field(default=None, init=False)
     count: int = field(default=0, init=False)
     uploaded: set[str] = field(default_factory=set, init=False)
+    pdfs: dict[str, Path] = field(default_factory=dict, init=False)
 
     def chain(self, rec: dict[str, Any]) -> dict[str, Any]:
         self.last = rec["uuid"]
@@ -578,6 +596,8 @@ class Session:
             src = self.backup.path(f)
             path = self.upload(f.name, f.id, src)
             paths.append(path)
+            if kind == "application/pdf":
+                self.pdfs[f"{f.id[:8]}-{f.name}"] = src
             if kind in IMAGES:
                 with src.open("rb") as image:
                     data, kind, shown = fit(image, kind, size)
@@ -735,6 +755,33 @@ class Session:
         match result.content:
             case [SearchResult(body=body)] if call.name == "WebFetch" and body:
                 return body, stored
+        if (
+            call.name == "Read"
+            and not result.is_error
+            and (pages := call.input.get("pages", "").strip())
+            and (pdf := self.pdfs.get(PurePosixPath(call.input["file_path"]).name))
+        ):
+            with pdf.open("rb") as file:
+                return [
+                    *(
+                        {"type": "text", "text": p}
+                        for p in result.content
+                        if isinstance(p, str)
+                    ),
+                    *(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "data": base64.b64encode(
+                                    recode(page, True, max(page.size) <= MAX_SIDE)[0]
+                                ).decode("ascii"),
+                                "media_type": "image/webp",
+                            },
+                        }
+                        for page in pdf_pages(file, pages)
+                    ),
+                ], stored
         blocks = search_results(result.content)
         if not blocks:
             alone = len(result.content) == 1
