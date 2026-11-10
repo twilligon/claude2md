@@ -163,6 +163,10 @@ ENDED = {"end_turn": "end_turn", "stop_sequence": "end_turn", "refusal": "refusa
 
 OWN = {"propose_skills"}
 
+RENAMED = {"web_search": "WebSearch", "web_fetch": "WebFetch"}
+
+ASKED = "The questions were shown to the user, who replies in their next message."
+
 
 CWD = "/home/claude"
 NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/twilligon/claude2md")
@@ -186,6 +190,44 @@ def mention(path: str) -> str:
 
 def stamp(when: datetime) -> str:
     return when.astimezone(UTC).isoformat(timespec="milliseconds")[:-6] + "Z"
+
+
+def claude_code_call(use: ToolUse) -> ToolUse:
+    name, input = use.name, use.input
+    if name == "ask_user_input_v0":
+        if asked := questions(input):
+            name, input = "AskUserQuestion", asked
+    elif name in RENAMED:
+        name = RENAMED[name]
+    return ToolUse(use.id, name, input, use.at)
+
+
+def questions(input: dict[str, Any]) -> dict[str, Any] | None:
+    asked = input.get("questions")
+    if set(input) != {"questions"} or not isinstance(asked, list):
+        return None
+    if not 1 <= len(asked) <= 4:
+        return None
+    out = []
+    for q in asked:
+        if not isinstance(q, dict) or not {"question", "options"} <= set(q):
+            return None
+        if set(q) - {"question", "options", "type"}:
+            return None
+        if q.get("type") not in (None, "single_select", "multi_select"):
+            return None
+        options = q["options"]
+        if not isinstance(options, list) or not 2 <= len(options) <= 4:
+            return None
+        out.append(
+            {
+                "question": q["question"],
+                "header": "",
+                "options": [{"label": o, "description": ""} for o in options],
+                "multiSelect": q.get("type") == "multi_select",
+            }
+        )
+    return {"questions": out}
 
 
 def base64_of(path: Path) -> str:
@@ -500,6 +542,9 @@ class Session:
         for p in result.content:
             if isinstance(p, SearchResult) and not (p.body.strip() or p.missing):
                 self.backup.lost(f"{p.url}: no page text")
+        asked = result.tool_use.name != call.name == "AskUserQuestion"
+        if asked and not result.is_error:
+            result = ToolResult(result.tool_use, [ASKED], result.is_error, result.at)
         if len(result.content) == 1 and isinstance(file := result.content[0], File):
             kind, size = self.backup.probe(file) or (None, 0)
             if kind in IMAGES:
@@ -568,6 +613,7 @@ class Session:
             for b in blocks
             if isinstance(b, ToolUse)
         }
+        calls = {b: claude_code_call(b) for b in ids}
 
         turns = [
             (is_result, list(group))
@@ -580,7 +626,7 @@ class Session:
             if is_result:
                 for b in group:
                     use = b.tool_use
-                    content, stored = self.result(b, use)
+                    content, stored = self.result(b, calls[use])
                     yield self.chain(
                         {
                             "parentUuid": self.last,
@@ -613,8 +659,8 @@ class Session:
                     block = {
                         "type": "tool_use",
                         "id": ids[b],
-                        "name": b.name,
-                        "input": b.input,
+                        "name": calls[b].name,
+                        "input": calls[b].input,
                     }
                 elif b.type == "thinking":
                     block = {
