@@ -22,14 +22,35 @@ from claude2md.chat import (
 ROLES = {"human": Role.USER, "assistant": Role.ASSISTANT}
 
 
-def read(text: str) -> Chat | None:
+def read(text: str, exported: str | None = None) -> Chat | None:
     try:
         export = json.loads(text)
     except JSONDecodeError:
         return None
     if not isinstance(export, dict) or "chat_messages" not in export:
         return None
+    if exported is not None:
+        fill(export, json.loads(exported))
     return parse(export)
+
+
+def fill(export: dict[str, Any], exported: dict[str, Any]) -> None:
+    twins = {data["uuid"]: data for data in exported["chat_messages"]}
+    for data in export["chat_messages"]:
+        if (twin := twins.get(data["uuid"])) is None:
+            continue
+        ours = [b for b in data["content"] if b["type"] == "tool_result"]
+        theirs = [b for b in twin["content"] if b["type"] == "tool_result"]
+        for result, other in zip(ours, theirs):
+            for item, page in zip(result["content"], other["content"]):
+                if item["type"] == "knowledge":
+                    item.update(
+                        {
+                            key: page[key]
+                            for key in ("text", "prompt_context_metadata")
+                            if key in page
+                        }
+                    )
 
 
 def parse(export: dict[str, Any]) -> Chat:

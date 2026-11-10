@@ -80,6 +80,39 @@ def find_chats(query: str) -> list[ChatsEntry]:
     )
 
 
+def copies(path: str) -> tuple[str, str | None]:
+    chats = Path(path).parent
+    if chats.name != "chats":
+        return path, None
+    id = Path(path).stem[-36:]
+    if chats.parent.name != "export":
+        exported = listed(chats.parent.parent.parent / "export", id)
+        return path, str(exported) if exported else None
+    store = store_of(chats.parent)
+    held = [
+        entry
+        for organization in (organizations(store) if store else [])
+        if (entry := organization.chat_list().entry(id)) and chat_file(entry).is_file()
+    ]
+    if not held:
+        return path, None
+    saved = chat_file(max(held, key=lambda entry: entry.updated_at))
+    return str(saved if Path(path).is_absolute() else os.path.relpath(saved)), path
+
+
+def listed(directory: Path, id: str) -> Path | None:
+    try:
+        with (directory / "chats.json").open(encoding="utf-8") as f:
+            entry = json.load(f).get(id)
+    except FileNotFoundError:
+        return None
+    if entry is None:
+        return None
+    name = entry.get("name")
+    slug = f"{name.translate(Nameable.FILENAME_XLAT)}-{id}" if name else id
+    return directory / "chats" / f"{slug}.json"
+
+
 def uploads_dirs(path: str) -> tuple[Path, ...]:
     if path.startswith("<"):
         return (Path("files"),)
