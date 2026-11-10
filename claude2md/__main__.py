@@ -1,4 +1,4 @@
-from claude2md import main
+from claude2md.cli import to_markdown
 
 if __name__ == "__main__":
-    main()
+    to_markdown()

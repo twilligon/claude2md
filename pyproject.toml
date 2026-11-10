@@ -22,7 +22,7 @@ classifiers = [
 dynamic = ["version", "description"]
 
 [project.scripts]
-claude2md = "claude2md:main"
+claude2md = "claude2md.cli:to_markdown"
 
 [project.urls]
 Repository = "https://github.com/twilligon/claude2md"
