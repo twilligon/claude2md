@@ -144,9 +144,15 @@ def results(content: str | list[dict[str, Any]]) -> list[str | SearchResult]:
     return [p for p in parts if (p if isinstance(p, str) else p.text).strip()]
 
 
+MAX_MENTION = 262144
+MAX_MENTION_CHARS = 100000
+MENTION_LINES = 2000
+
 CLEARED = "[Old tool result content cleared]"
 PAGE_TEXT_REMOVED = "[Page text removed]"
 IMAGE_REMOVED = "[Image removed]"
+
+MAX_PDF_PAGES = 10
 
 IMAGES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 LOSSLESS = {"image/png", "image/gif"}
@@ -506,13 +512,17 @@ class Session:
         paths: list[str] = []
         attachments: list[dict[str, Any]] = []
         documents: list[dict[str, Any]] = []
+        unread: list[str] = []
 
-        def attach(path: str, kind: str, file: dict[str, Any]) -> None:
+        def attach(
+            path: str, kind: str, file: dict[str, Any], cut: bool = False
+        ) -> None:
             attachments.append(
                 {
                     "type": "file",
                     "filename": path,
                     "content": {"type": kind, "file": file},
+                    **({"truncated": True} if cut else {}),
                     "displayPath": path,
                 }
             )
@@ -535,12 +545,27 @@ class Session:
                     "dimensions": shown,
                 }
                 attach(path, "image", file)
-            elif kind == "application/pdf":
+            elif kind == "application/pdf" and (
+                not msg.cowork or (f.pages and f.pages <= MAX_PDF_PAGES)
+            ):
                 data = base64_of(src)
                 file = {"filePath": path, "base64": data, "originalSize": size}
                 attach(path, "pdf", file)
-                source = {"type": "base64", "media_type": kind, "data": data}
-                documents.append({"type": "document", "source": source, "title": path})
+                if not msg.cowork:
+                    source = {"type": "base64", "media_type": kind, "data": data}
+                    documents.append(
+                        {"type": "document", "source": source, "title": path}
+                    )
+            elif kind == "application/pdf":
+                attachments.append(
+                    {
+                        "type": "pdf_reference",
+                        "filename": path,
+                        "pageCount": f.pages,
+                        "fileSize": size,
+                        "displayPath": path,
+                    }
+                )
 
         for a in msg.attachments:
             file = File(a.name or "", "document", a.id)
@@ -549,23 +574,44 @@ class Session:
                 include(file, probed)
                 continue
             src = self.backup.path(file)
-            text = src.read_bytes().decode()
+            data = src.read_bytes()
+            text = data.decode()
             lines = text.count("\n") + 1
             path = self.upload(file.name, file.id, src)
             paths.append(path)
+            if msg.cowork and len(data) > MAX_MENTION:
+                attachments.append(
+                    {
+                        "type": "at_mention_reference",
+                        "mentions": [path],
+                        "unread": "too_large",
+                        "fileSize": len(data),
+                        "displayPath": path,
+                    }
+                )
+                continue
+            cut = msg.cowork and len(text) > MAX_MENTION_CHARS
+            head = "\n".join(text.split("\n")[:MENTION_LINES]) if cut else text
+            if cut and (lines <= MENTION_LINES or len(head) > MAX_MENTION_CHARS):
+                unread.append(path)
+                continue
+            shown = MENTION_LINES if cut else lines
             attach(
                 path,
                 "text",
                 {
                     "filePath": path,
-                    "content": text,
-                    "numLines": lines,
+                    "content": head,
+                    "numLines": shown,
                     "startLine": 1,
                     "totalLines": lines,
                 },
+                cut,
             )
         for f in msg.files:
             include(f, self.backup.probe(f))
+        if unread:
+            attachments.append({"type": "at_mention_reference", "mentions": unread})
         if system_prompt is not None:
             parts = [system_prompt] if system_prompt else []
             attachments.append({"type": "prompt_snapshot", "systemPrompt": parts})

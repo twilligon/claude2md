@@ -34,6 +34,7 @@ class File:
     name: str
     kind: str | None
     id: str
+    pages: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -126,6 +127,7 @@ class Message(Event):
     attachments: list[Attachment] = field(default_factory=list)
     files: list[File] = field(default_factory=list)
     stop_reason: str | None = None
+    cowork: bool = False
     id: str = field(kw_only=True)
 
 

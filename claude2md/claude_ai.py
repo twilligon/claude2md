@@ -33,23 +33,64 @@ def read(text: str) -> Chat | None:
 
 def parse(export: dict[str, Any]) -> Chat:
     by_uuid: dict[str, Message] = {}
+    call, ran = handoff(export)
+    cowork = False
     for data in export["chat_messages"]:
+        cowork = cowork or any(handed(b, call) for b in data["content"])
+        content, times = blocks(data, None if ran else call)
         pasted = attachments(data)
         parent = by_uuid.get(data["parent_message_uuid"])
         by_uuid[data["uuid"]] = Message(
             parent=parent,
             role=ROLES[data["sender"]],
-            blocks=parse_content(data["content"], results, done(data)),
+            blocks=parse_content(content, results, times),
             created_at=datetime.fromisoformat(data["created_at"]),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
             stop_reason=data.get("stop_reason"),
+            cowork=cowork,
             id=data["uuid"],
         )
     return Chat(
         list(by_uuid.values()),
         name=oneline(export.get("name") or "") or None,
         leaf=by_uuid.get(export.get("current_leaf_message_uuid")),
+    )
+
+
+def handoff(export: dict[str, Any]) -> tuple[str | None, bool]:
+    content = [b for data in export["chat_messages"] for b in data["content"]]
+    first = next((n for n, b in enumerate(content) if by_claude_code(b)), 0)
+    calls = [b for b in content[:first] if b["type"] == "tool_use"]
+    if not calls:
+        return None, False
+    id = calls[-1].get("id")
+    for b in content:
+        if b["type"] == "tool_result" and b.get("tool_use_id") == id:
+            if by_claude_code(b):
+                return id, True
+            if b.get("content") or b.get("is_error"):
+                return None, False
+    return id, False
+
+
+def by_claude_code(block: dict[str, Any]) -> bool:
+    return block.get("integration_name") == "Claude Code"
+
+
+def blocks(
+    data: dict[str, Any], unrun: str | None
+) -> tuple[list[dict[str, Any]], list[datetime | None]]:
+    return (
+        [b for b in data["content"] if not handed(b, unrun)],
+        [t for b, t in zip(data["content"], done(data)) if not handed(b, unrun)],
+    )
+
+
+def handed(block: dict[str, Any], handoff: str | None) -> bool:
+    return handoff is not None and handoff in (
+        block.get("id"),
+        block.get("tool_use_id"),
     )
 
 
@@ -97,12 +138,17 @@ def files(data: dict[str, Any], pasted: set[str]) -> list[File]:
         for b in data["content"]
         if b["type"] == "image"
     ]
+    pages = {
+        f["file_uuid"]: count
+        for f in listed
+        if (count := (f.get("document_asset") or {}).get("page_count")) is not None
+    }
     files: dict[str, File] = {}
     for f in listed:
         id = f["file_uuid"]
         if id in pasted:
             continue
-        file = File(f.get("file_name") or "", f.get("file_kind"), id)
+        file = File(f.get("file_name") or "", f.get("file_kind"), id, pages.get(id))
         files.setdefault(file.id, file)
     return list(files.values())
 
