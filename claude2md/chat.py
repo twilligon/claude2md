@@ -33,9 +33,47 @@ class File:
     id: str
 
 
+@dataclass(slots=True, frozen=True)
+class SearchResult:
+    title: str
+    url: str
+    body: str
+    age: str | None = None
+    missing: bool = False
+
+    @property
+    def text(self) -> str:
+        lines = [self.title, self.url]
+        lines += [self.age] if self.age else []
+        return "\n".join(lines) + (f"\n\n{self.body}" if self.body else "")
+
+
+@dataclass(slots=True, frozen=True)
+class Gallery:
+    images: tuple[tuple[str, str, str], ...]
+    expired: bool = False
+
+    @property
+    def text(self) -> str:
+        images = ["\n".join(image) for image in self.images]
+        images += ["[image results expired]"] if self.expired else []
+        return "\n\n".join(images)
+
+
 @dataclass(slots=True, frozen=True, eq=False)
 class ToolResult:
     tool_use: ToolUse
+    content: list[str | File | SearchResult | Gallery]
+    is_error: bool
+
+    @property
+    def text(self) -> str:
+        def text(part: str | File | SearchResult | Gallery) -> str:
+            if isinstance(part, File):
+                return f"[image {part.id}]"
+            return part if isinstance(part, str) else part.text
+
+        return "\n\n".join(text(p) for p in self.content)
 
 
 @dataclass(slots=True, frozen=True)
