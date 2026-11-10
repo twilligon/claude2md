@@ -43,6 +43,8 @@ def parse(export: dict[str, Any]) -> Chat:
             created_at=datetime.fromisoformat(data["created_at"]),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
+            stop_reason=data.get("stop_reason"),
+            id=data["uuid"],
         )
     return Chat(
         list(by_uuid.values()),

@@ -1,4 +1,5 @@
 from contextlib import suppress
+from functools import partial
 from typing import IO, Iterable
 
 import argparse
@@ -11,6 +12,11 @@ from claude_backup import ChatsEntry, Nameable, Organization
 from claude2md import __version__, claude_ai, claude_code, markdown
 from claude2md.backup import Backup, chat_file, find_chats, uploads_dirs
 from claude2md.chat import Chat, Event, Message
+
+DESCRIPTIONS = {
+    "markdown": "Convert Claude.ai or Claude Code chats to Markdown",
+    "claude-code": "Import a Claude.ai chat as a Claude Code session",
+}
 
 
 def read(file: IO[str]) -> Chat:
@@ -77,10 +83,8 @@ def select_branch(chat: Chat, branch: str | None) -> Message:
         sys.exit(1)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Convert Claude.ai or Claude Code chats to Markdown",
-    )
+def build_parser(to: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=DESCRIPTIONS[to])
     parser.add_argument(
         "-v",
         "--version",
@@ -93,20 +97,28 @@ def build_parser() -> argparse.ArgumentParser:
         default="-",
         help="chat JSON, UUID, name, or URL (default: stdin)",
     )
-    parser.add_argument(
-        "-e",
-        "--embed",
-        action="store_true",
-        default=None,
-        help="embed media as data URLs",
-    )
-    parser.add_argument(
-        "-E",
-        "--no-embed",
-        dest="embed",
-        action="store_false",
-        help="link text attachments like media",
-    )
+    if to == "markdown":
+        parser.add_argument(
+            "-e",
+            "--embed",
+            action="store_true",
+            default=None,
+            help="embed media as data URLs",
+        )
+        parser.add_argument(
+            "-E",
+            "--no-embed",
+            dest="embed",
+            action="store_false",
+            help="link text attachments like media",
+        )
+    else:
+        parser.add_argument(
+            "-s",
+            "--system",
+            metavar="PROMPT",
+            help="use a custom system prompt",
+        )
     parser.add_argument(
         "--lossy",
         action="store_true",
@@ -124,8 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-b",
         "--branch",
         metavar="ID",
-        help="show messages from a specific non-default branch",
+        help="use a specific non-default branch",
     )
+    if to == "claude-code":
+        return parser
     branches.add_argument(
         "-A",
         "--all-branches",
@@ -172,12 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def to_markdown() -> None:
+def main(to: str) -> None:
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
 
-    parser = build_parser()
+    parser = build_parser(to)
     args = parser.parse_args()
 
     path = args.chat
@@ -195,7 +209,7 @@ def to_markdown() -> None:
     try:
         if args.branches:
             print_branches(chat)
-        else:
+        elif to == "markdown":
             if args.user is args.assistant is args.thinking is None:
                 args.user, args.assistant, args.thinking = True, True, False
             options = markdown.Options(
@@ -206,5 +220,12 @@ def to_markdown() -> None:
             else:
                 leaf = select_branch(chat, args.branch)
                 markdown.write_branch(chat, leaf, backup, options, args.name)
+        else:
+            leaf = select_branch(chat, args.branch)
+            print(claude_code.write(chat, backup, leaf, args.system))
     except OSError as e:
         sys.exit(f"Error: {e}")
+
+
+to_markdown = partial(main, "markdown")
+to_claude_code = partial(main, "claude-code")

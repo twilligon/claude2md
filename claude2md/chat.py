@@ -125,6 +125,8 @@ class Message(Event):
     created_at: datetime
     attachments: list[Attachment] = field(default_factory=list)
     files: list[File] = field(default_factory=list)
+    stop_reason: str | None = None
+    id: str = field(kw_only=True)
 
 
 @dataclass(frozen=True)

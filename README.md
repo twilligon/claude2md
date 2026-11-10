@@ -56,7 +56,7 @@ The bleeding-edge way:
 
     branches:
       -B, --branches      list all branches
-      -b, --branch ID     show messages from a specific non-default branch
+      -b, --branch ID     use a specific non-default branch
       -A, --all-branches  show messages from all branches tagged with branch IDs
 
     filters:
@@ -65,6 +65,26 @@ The bleeding-edge way:
       -u, --user          show user messages
       -a, --assistant     show assistant messages
       -t, --thinking      show thinking blocks
+
+`claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code.
+
+    $ claude2code --help
+    usage: claude2code [-h] [-v] [-s PROMPT] [--lossy] [-B | -b ID] [chat]
+
+    Import a Claude.ai chat as a Claude Code session
+
+    positional arguments:
+      chat                 chat JSON, UUID, name, or URL (default: stdin)
+
+    options:
+      -h, --help           show this help message and exit
+      -v, --version        show program's version number and exit
+      -s, --system PROMPT  use a custom system prompt
+      --lossy              make do without what the backup lacks
+
+    branches:
+      -B, --branches       list all branches
+      -b, --branch ID      use a specific non-default branch
 
 ## Examples
 

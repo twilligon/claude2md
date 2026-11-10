@@ -101,6 +101,22 @@ def uploads_dirs(path: str) -> tuple[Path, ...]:
     return tuple(Path(os.path.relpath(files)) for files in found)
 
 
+def media_type(file: BinaryIO) -> str | None:
+    head = file.read(12)
+    file.seek(0)
+    if head.startswith(b"\x89PNG"):
+        return "image/png"
+    if head.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if head.startswith(b"GIF8"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head.startswith(b"%PDF"):
+        return "application/pdf"
+    return None
+
+
 # https://mimesniff.spec.whatwg.org/
 WHATWG = [
     (b"\x00\x00\x01\x00", b"\xff\xff\xff\xff", "image/x-icon"),
@@ -175,8 +191,13 @@ class Backup:
         )
         return files / slug
 
+    def lost(self, what: str) -> None:
+        if not self.lossy:
+            raise FileNotFoundError(what)
+        print(f"lossy: {what}", file=sys.stderr)
+
     def probe(
-        self, file: File, sniff: Callable[[BinaryIO], str | None]
+        self, file: File, sniff: Callable[[BinaryIO], str | None] = media_type
     ) -> tuple[str | None, int] | None:
         path = self.path(file)
         try:
