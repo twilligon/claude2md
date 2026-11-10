@@ -279,6 +279,34 @@ def kept(result: ToolResult, call: ToolUse) -> Any:
     return text
 
 
+def search_results(parts: list[str | File | SearchResult]) -> list[dict[str, Any]]:
+    n = sum(isinstance(p, SearchResult) for p in parts)
+    pages, rest = parts[:n], parts[n:]
+    if not n or not all(
+        isinstance(p, SearchResult) and p.url and not p.missing for p in pages
+    ):
+        return []
+    if not all(isinstance(t, str) for t in rest):
+        return []
+    blocks = [
+        {
+            "type": "search_result",
+            "source": p.url,
+            "title": p.title or p.url,
+            "content": [
+                {"type": "text", "text": t}
+                for t in (p.age, p.body if p.body.strip() else PAGE_TEXT_REMOVED)
+                if t
+            ],
+            "citations": {"enabled": False},
+        }
+        for p in pages
+        if isinstance(p, SearchResult)
+    ]
+    blocks[-1]["content"] += [{"type": "text", "text": t} for t in rest]
+    return blocks
+
+
 def base64_of(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
 
@@ -612,14 +640,16 @@ class Session:
         match result.content:
             case [SearchResult(body=body)] if call.name == "WebFetch" and body:
                 return body, stored
-        alone = len(result.content) == 1
-        blocks = [self.part(p, alone) for p in result.content]
-        if pages := [p for p in result.content if isinstance(p, SearchResult)]:
-            texts = [b["text"] for b in blocks if b["type"] == "text"]
-            if any(not p.body and not p.missing for p in pages):
-                texts.append(PAGE_TEXT_REMOVED)
-            images = [b for b in blocks if b["type"] == "image"]
-            blocks = [{"type": "text", "text": "\n\n".join(texts)}, *images]
+        blocks = search_results(result.content)
+        if not blocks:
+            alone = len(result.content) == 1
+            blocks = [self.part(p, alone) for p in result.content]
+            if pages := [p for p in result.content if isinstance(p, SearchResult)]:
+                texts = [b["text"] for b in blocks if b["type"] == "text"]
+                if any(not p.body and not p.missing for p in pages):
+                    texts.append(PAGE_TEXT_REMOVED)
+                images = [b for b in blocks if b["type"] == "image"]
+                blocks = [{"type": "text", "text": "\n\n".join(texts)}, *images]
         if not (call.name[:1].isupper() or call.name in OWN):
             return blocks, stored if result.is_error else blocks
         if len(blocks) == 1 and blocks[0]["type"] == "text":
