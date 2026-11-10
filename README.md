@@ -66,7 +66,7 @@ The bleeding-edge way:
       -a, --assistant     show assistant messages
       -t, --thinking      show thinking blocks
 
-`claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code.
+`claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code. PDF pages the chat read are rendered with `pdftoppm`.
 
     $ claude2code --help
     usage: claude2code [-h] [-v] [-s PROMPT] [--lossy] [-B | -b ID] [chat]
