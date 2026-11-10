@@ -1,4 +1,5 @@
 from contextlib import suppress
+from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, Iterable
 
@@ -76,18 +77,30 @@ def user(data: dict[str, Any], parent: Event | None) -> Message | None:
         blocks = [Block("text", content)]
     else:
         blocks = parse_content(content, results)
-    return Message(parent, Role.USER, blocks)
+    return Message(
+        parent,
+        Role.USER,
+        blocks,
+        datetime.fromisoformat(data["timestamp"]),
+    )
 
 
 def assistant(turn: list[dict[str, Any]], parent: Event | None) -> Message:
     content: list[dict[str, Any]] = []
+    times: list[datetime] = []
     for data in turn:
         api = data.get("message")
         if not isinstance(api, dict) or not isinstance(api.get("content"), list):
             continue
         content += api["content"]
-    blocks = parse_content(content, results)
-    return Message(parent, Role.ASSISTANT, blocks)
+        times += [datetime.fromisoformat(data["timestamp"])] * len(api["content"])
+    blocks = parse_content(content, results, times)
+    return Message(
+        parent,
+        Role.ASSISTANT,
+        blocks,
+        datetime.fromisoformat(turn[0]["timestamp"]),
+    )
 
 
 def results(content: str | list[dict[str, Any]]) -> list[str | SearchResult]:

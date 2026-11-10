@@ -1,3 +1,4 @@
+from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, Callable
 
@@ -38,7 +39,8 @@ def parse(export: dict[str, Any]) -> Chat:
         by_uuid[data["uuid"]] = Message(
             parent=parent,
             role=ROLES[data["sender"]],
-            blocks=parse_content(data["content"], results),
+            blocks=parse_content(data["content"], results, done(data)),
+            created_at=datetime.fromisoformat(data["created_at"]),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
         )
@@ -47,6 +49,26 @@ def parse(export: dict[str, Any]) -> Chat:
         name=oneline(export.get("name") or "") or None,
         leaf=by_uuid.get(export.get("current_leaf_message_uuid")),
     )
+
+
+def span(
+    block: dict[str, Any], data: dict[str, Any]
+) -> tuple[datetime | None, datetime | None]:
+    saved = datetime.fromisoformat(data["created_at"])
+    start, stop = (
+        datetime.fromisoformat(t) if (t := block.get(key)) else None
+        for key in ("start_timestamp", "stop_timestamp")
+    )
+    return (None, None) if start == stop == saved else (start, stop)
+
+
+def done(data: dict[str, Any]) -> list[datetime | None]:
+    spans = [span(b, data) for b in data["content"]]
+    starts = [start for start, _ in spans[1:]] + [None]
+    return [
+        min((t for t in (stop, start) if t), default=None)
+        for (_, stop), start in zip(spans, starts)
+    ]
 
 
 def attachments(data: dict[str, Any]) -> list[Attachment]:
@@ -123,18 +145,20 @@ def results(
     return parts
 
 
-def parse_block(obj: dict[str, Any]) -> Block | ToolUse | None:
+def parse_block(
+    obj: dict[str, Any], at: datetime | None = None
+) -> Block | ToolUse | None:
     match obj["type"]:
         case "text":
             if content := obj["text"].strip():
-                return Block("text", content)
+                return Block("text", content, at)
         case "thinking":
             summaries = (s.get("summary") or "" for s in obj.get("summaries") or [])
             summary = "\n\n".join(s.strip() for s in summaries if s.strip())
             if content := (obj.get("thinking") or "").strip() or summary:
-                return Block("thinking", content)
+                return Block("thinking", content, at)
         case "tool_use":
-            return ToolUse(obj.get("id"), obj["name"], obj["input"])
+            return ToolUse(obj.get("id"), obj["name"], obj["input"], at)
         case (
             "image"
             | "fallback"
@@ -153,17 +177,21 @@ def parse_block(obj: dict[str, Any]) -> Block | ToolUse | None:
 def parse_content(
     content: list[dict[str, Any]],
     results: Callable[[Any], list[str | File | SearchResult | Gallery]],
+    times: list[datetime | None] | None = None,
 ) -> list[Block | ToolUse | ToolResult]:
     blocks: list[Block | ToolUse | ToolResult] = []
     unanswered: list[ToolUse] = []
-    for obj in content:
+    for n, obj in enumerate(content):
+        at = times[n] if times else None
         if obj["type"] == "tool_result":
             wanted = obj.get("tool_use_id")
             if use := next((u for u in unanswered if wanted in (None, u.id)), None):
                 unanswered.remove(use)
                 error = obj.get("is_error", False)
-                blocks.append(ToolResult(use, results(obj.get("content", [])), error))
-        elif block := parse_block(obj):
+                blocks.append(
+                    ToolResult(use, results(obj.get("content", [])), error, at)
+                )
+        elif block := parse_block(obj, at):
             blocks.append(block)
             if isinstance(block, ToolUse):
                 unanswered.append(block)

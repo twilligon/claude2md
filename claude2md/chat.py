@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from functools import cached_property
 from typing import Any, Iterator
@@ -17,6 +18,7 @@ class Role(Enum):
 class Block:
     type: str
     content: str
+    at: datetime | None = None
 
 
 @dataclass(slots=True, frozen=True, eq=False)
@@ -24,6 +26,7 @@ class ToolUse:
     id: str | None
     name: str
     input: dict[str, Any]
+    at: datetime | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -65,6 +68,7 @@ class ToolResult:
     tool_use: ToolUse
     content: list[str | File | SearchResult | Gallery]
     is_error: bool
+    at: datetime | None = None
 
     @property
     def text(self) -> str:
@@ -118,6 +122,7 @@ class Event:
 class Message(Event):
     role: Role
     blocks: list[Block | ToolUse | ToolResult]
+    created_at: datetime
     attachments: list[Attachment] = field(default_factory=list)
     files: list[File] = field(default_factory=list)
 
