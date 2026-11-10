@@ -25,6 +25,7 @@ from claude2md.chat import (
     Block,
     Chat,
     Event,
+    Fallback,
     File,
     Gallery,
     Message,
@@ -168,6 +169,11 @@ FIRST_QUALITY = 90
 UNSIGNED = "none"
 
 ENDED = {"end_turn": "end_turn", "stop_sequence": "end_turn", "refusal": "refusal"}
+FLAGGED = (
+    "Claude's safeguards flagged this message. Our intentionally broad safeguards"
+    " allow us to deliver more capabilities faster, but can sometimes flag"
+    " legitimate coding, cybersecurity, and biology tasks."
+)
 
 OWN = {"propose_skills"}
 
@@ -687,6 +693,8 @@ class Session:
                     "sessionId": self.id,
                 }
             )
+        if msg.fallback:
+            yield self.banner(msg, msg.fallback)
 
     def result(
         self, result: ToolResult, call: ToolUse
@@ -751,6 +759,33 @@ class Session:
             source = {"type": "base64", "media_type": kind, "data": data}
             return {"type": "image", "source": source}
         return {"type": "text", "text": part if isinstance(part, str) else part.text}
+
+    def banner(self, msg: Message, fallback: Fallback) -> dict[str, Any]:
+        return self.chain(
+            {
+                "parentUuid": self.last,
+                "isSidechain": False,
+                "type": "system",
+                "subtype": "model_refusal_fallback",
+                "direction": "retry",
+                "scope": "session",
+                "content": fallback.notice,
+                "level": "warning",
+                "trigger": "refusal",
+                "originalModel": fallback.from_model,
+                "fallbackModel": fallback.to_model,
+                "requestId": None,
+                "apiRefusalCategory": fallback.categories[0],
+                "apiRefusalExplanation": None,
+                **({"sawCyberRefusal": True} if "cyber" in fallback.categories else {}),
+                "refusedUserMessageUuid": derive(msg.id, "prompt"),
+                "timestamp": stamp(msg.created_at),
+                "uuid": derive(msg.id, "banner"),
+                "cwd": CWD,
+                "sessionId": self.id,
+                "neutralizedByFork": True,
+            }
+        )
 
     @staticmethod
     def message(
@@ -858,6 +893,24 @@ class Session:
                 if isinstance(b, ToolUse):
                     use_records[b] = rec["uuid"]
                 yield rec
+        if msg.stop_reason == "refusal" and not (
+            isinstance(msg.parent, Message) and msg.parent.fallback
+        ):
+            yield self.chain(
+                {
+                    "parentUuid": self.last,
+                    "isSidechain": False,
+                    "type": "system",
+                    "subtype": "informational",
+                    "content": FLAGGED,
+                    "isMeta": False,
+                    "timestamp": stamp(msg.created_at),
+                    "uuid": derive(msg.id, "flagged"),
+                    "level": "warning",
+                    "cwd": CWD,
+                    "sessionId": self.id,
+                }
+            )
 
     def records(
         self, leaf: Message, system_prompt: str | None = None

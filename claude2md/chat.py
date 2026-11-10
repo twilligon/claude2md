@@ -88,6 +88,14 @@ class Attachment:
     id: str
 
 
+@dataclass(slots=True, frozen=True)
+class Fallback:
+    from_model: str
+    to_model: str
+    categories: tuple[str, ...]
+    notice: str
+
+
 @dataclass(slots=True, frozen=True, eq=False)
 class Event:
     parent: "Event | None"
@@ -126,6 +134,7 @@ class Message(Event):
     created_at: datetime
     attachments: list[Attachment] = field(default_factory=list)
     files: list[File] = field(default_factory=list)
+    fallback: Fallback | None = None
     stop_reason: str | None = None
     cowork: bool = False
     id: str = field(kw_only=True)
