@@ -1,12 +1,15 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import groupby
+from pathlib import Path
 from typing import IO
 
 import html
+import mimetypes
 import sys
 
-from claude2md.chat import Block, Chat, Message, Role
+from claude2md.backup import Backup, base64_stream, whatwg_type
+from claude2md.chat import Block, Chat, File, Message, Role
 
 
 class Writer:
@@ -38,10 +41,23 @@ class Options:
     user: bool = True
     assistant: bool = True
     thinking: bool = True
+    embed: bool | None = None
 
 
-def lines(text: str) -> int:
-    return text.count("\n") + (text[-1:] not in ("", "\n"))
+def target(path: Path) -> str:
+    if path.is_absolute() and path.is_relative_to(Path.home()):
+        path = "~" / path.relative_to(Path.home())
+    text = str(path)
+    return f"<{text}>" if any(c.isspace() or c in "()" for c in text) else text
+
+
+def lines(path: Path) -> int:
+    count, last = 0, b"\n"
+    with path.open("rb") as f:
+        while chunk := f.read(1 << 16):
+            count += chunk.count(b"\n")
+            last = chunk[-1:]
+    return count + (last != b"\n")
 
 
 def size(n: int) -> str:
@@ -52,24 +68,65 @@ def size(n: int) -> str:
     return f"{n / 1_000_000:.2f} MB"
 
 
-def render(msg: Message, writer: Writer, options: Options, prefix: str = "") -> None:
+def link(writer: Writer, file: File, backup: Backup, embed: bool | None) -> None:
+    path = backup.path(file)
+    probed = backup.probe(file, whatwg_type)
+    if probed is None:
+        writer.write(
+            "!"
+            if (file.kind or (mimetypes.guess_type(file.name)[0] or "").split("/")[0])
+            == "image"
+            else ""
+        )
+    else:
+        writer.write("!" if (probed[0] or "").startswith("image/") else "")
+    writer.write(f"[{file.name}](")
+    if probed is None or embed is not True:
+        writer.write(target(path))
+    else:
+        kind = probed[0] or mimetypes.guess_type(file.name)[0]
+        writer.write(f"data:{kind or 'application/octet-stream'};base64,")
+        with path.open("rb") as f:
+            base64_stream(f, writer)
+    writer.write(")\n")
+
+
+def render(
+    msg: Message, writer: Writer, backup: Backup, options: Options, prefix: str = ""
+) -> None:
     match msg.role:
         case Role.USER if options.user:
             writer.section(prefix, "> ")
 
-            for attachment in msg.attachments:
-                name = attachment.get("file_name")
-                text = attachment["extracted_content"]
-                n = lines(text)
+            for a in msg.attachments:
+                file = File(a.name or "", "document", a.id)
+                path = backup.path(file)
+                if options.embed is False:
+                    writer.write(f"[{a.name or 'Pasted content'}]({target(path)})\n")
+                    continue
+                probed = backup.probe(file, whatwg_type)
+                inline = probed is not None and probed[0] != "application/pdf"
                 summary = (
-                    f"<code>{html.escape(name, quote=False)}</code>"
-                    if name
+                    f"<code>{html.escape(a.name, quote=False)}</code>"
+                    if a.name
                     else "Pasted content"
                 )
-                summary += f" ({n} line{'s' * (n != 1)}, {size(len(text.encode()))})"
+                if inline:
+                    n = lines(path)
+                    summary += f" ({n} line{'s' * (n != 1)}, {size(probed[1])})"
                 writer.write(f"<details>\n<summary>{summary}</summary>\n\n")
-                writer.write(text)
-                writer.write(("" if text.endswith("\n") else "\n") + "\n</details>\n")
+                end = ""
+                if inline:
+                    with path.open(encoding="utf-8", newline="") as f:
+                        while chunk := f.read(1 << 16):
+                            writer.write(chunk)
+                            end = chunk[-1]
+                else:
+                    writer.write(target(path))
+                writer.write(("" if end == "\n" else "\n") + "\n</details>\n")
+
+            for file in msg.files:
+                link(writer, file, backup, options.embed)
 
             for block in msg.blocks:
                 if isinstance(block, Block):
@@ -95,6 +152,11 @@ def render(msg: Message, writer: Writer, options: Options, prefix: str = "") -> 
                         writer.write(b.content)
                         writer.write("\n")
 
+            if msg.files and options.assistant:
+                writer.section(prefix)
+                for file in msg.files:
+                    link(writer, file, backup, options.embed)
+
 
 def title(chat: Chat, name: bool | None) -> str | None:
     if name or (name is None and chat.name):
@@ -105,6 +167,7 @@ def title(chat: Chat, name: bool | None) -> str | None:
 def write_branch(
     chat: Chat,
     msg: Message,
+    backup: Backup,
     options: Options = Options(),
     name: bool | None = None,
     out: IO[str] = sys.stdout,
@@ -113,11 +176,12 @@ def write_branch(
         out.write(heading)
     writer = Writer(out, first=not heading)
     for ancestor in msg.branch():
-        render(ancestor, writer, options)
+        render(ancestor, writer, backup, options)
 
 
 def write_all(
     chat: Chat,
+    backup: Backup,
     options: Options = Options(),
     name: bool | None = None,
     out: IO[str] = sys.stdout,
@@ -132,4 +196,4 @@ def write_all(
         out.write(f"{tags}\t{heading}")
     writer = Writer(out, first=not heading)
     for msg in chat.messages:
-        render(msg, writer, options, ",".join(ids[msg]) + "\t")
+        render(msg, writer, backup, options, ",".join(ids[msg]) + "\t")

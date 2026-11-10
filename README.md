@@ -10,7 +10,7 @@ For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backu
 
 You can filter the exports to any subset of user, assistant, and thinking blocks. For context management I've found it's often helpful to only export user messages, though obviously for the strongest "continuity" between an exported chat transcript and its consumer you want all context from the prior chat.
 
-We try to include Claude.ai attachments when they're available in the export, but the format we parse right now does not have them embedded in the JSON or anything, so in practice only attachments with `extracted_content`, i.e. text files, markdown, etc. will be present in the transcripts.
+Text attachments are inlined and other uploads linked; `--embed` inlines everything, `--no-embed` nothing.
 
 You can branch conversations on Claude.ai (and to a lesser extent in Claude Code), and `claude2md` can export any branch. You can list the branches of a chat and their IDs with `claude2md --branches`, export a specific branch with `claude2md --branch ID`, or dump every branch at once with `claude2md --all-branches` (each line gets tagged with the IDs of the branches that contain it).
 
@@ -38,7 +38,9 @@ The bleeding-edge way:
 ## Usage
 
     $ claude2md --help
-    usage: claude2md [-h] [-v] [-B | -b ID | -A] [-n] [-N] [-u] [-a] [-t] [chat]
+    usage: claude2md [-h] [-v] [-e] [-E] [--lossy] [-B | -b ID | -A] [-n] [-N]
+                     [-u] [-a] [-t]
+                     [chat]
 
     Convert Claude.ai or Claude Code chats to Markdown
 
@@ -48,6 +50,9 @@ The bleeding-edge way:
     options:
       -h, --help          show this help message and exit
       -v, --version       show program's version number and exit
+      -e, --embed         embed media as data URLs
+      -E, --no-embed      link text attachments like media
+      --lossy             make do without what the backup lacks
 
     branches:
       -B, --branches      list all branches

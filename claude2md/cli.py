@@ -9,7 +9,7 @@ import sys
 from claude_backup import ChatsEntry, Nameable, Organization
 
 from claude2md import __version__, claude_ai, claude_code, markdown
-from claude2md.backup import chat_file, find_chats
+from claude2md.backup import Backup, chat_file, find_chats, uploads_dirs
 from claude2md.chat import Chat, Event, Message
 
 
@@ -93,6 +93,25 @@ def build_parser() -> argparse.ArgumentParser:
         default="-",
         help="chat JSON, UUID, name, or URL (default: stdin)",
     )
+    parser.add_argument(
+        "-e",
+        "--embed",
+        action="store_true",
+        default=None,
+        help="embed media as data URLs",
+    )
+    parser.add_argument(
+        "-E",
+        "--no-embed",
+        dest="embed",
+        action="store_false",
+        help="link text attachments like media",
+    )
+    parser.add_argument(
+        "--lossy",
+        action="store_true",
+        help="make do without what the backup lacks",
+    )
 
     branches = parser.add_argument_group("branches").add_mutually_exclusive_group()
     branches.add_argument(
@@ -171,15 +190,21 @@ def to_markdown() -> None:
         sys.exit(f"Error: {e}")
     except ValueError as e:
         parser.error(str(e))
+    backup = Backup(uploads_dirs(file.name), args.lossy)
 
-    if args.branches:
-        print_branches(chat)
-    else:
-        if args.user is args.assistant is args.thinking is None:
-            args.user, args.assistant, args.thinking = True, True, False
-        options = markdown.Options(args.user, args.assistant, args.thinking)
-        if args.all_branches:
-            markdown.write_all(chat, options, args.name)
+    try:
+        if args.branches:
+            print_branches(chat)
         else:
-            leaf = select_branch(chat, args.branch)
-            markdown.write_branch(chat, leaf, options, args.name)
+            if args.user is args.assistant is args.thinking is None:
+                args.user, args.assistant, args.thinking = True, True, False
+            options = markdown.Options(
+                args.user, args.assistant, args.thinking, args.embed
+            )
+            if args.all_branches:
+                markdown.write_all(chat, backup, options, args.name)
+            else:
+                leaf = select_branch(chat, args.branch)
+                markdown.write_branch(chat, leaf, backup, options, args.name)
+    except OSError as e:
+        sys.exit(f"Error: {e}")

@@ -26,9 +26,23 @@ class ToolUse:
     input: dict[str, Any]
 
 
+@dataclass(slots=True, frozen=True)
+class File:
+    name: str
+    kind: str | None
+    id: str
+
+
 @dataclass(slots=True, frozen=True, eq=False)
 class ToolResult:
     tool_use: ToolUse
+
+
+@dataclass(slots=True, frozen=True)
+class Attachment:
+    name: str | None
+    media_type: str | None
+    id: str
 
 
 @dataclass(slots=True, frozen=True, eq=False)
@@ -66,7 +80,8 @@ class Event:
 class Message(Event):
     role: Role
     blocks: list[Block | ToolUse | ToolResult]
-    attachments: list[dict[str, Any]] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
+    files: list[File] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
