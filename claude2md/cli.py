@@ -6,7 +6,10 @@ import io
 import os
 import sys
 
+from claude_backup import ChatsEntry, Nameable, Organization
+
 from claude2md import __version__, claude_ai, claude_code, markdown
+from claude2md.backup import chat_file, find_chats
 from claude2md.chat import Chat, Event, Message
 
 
@@ -31,6 +34,40 @@ def print_branches(chat: Chat, file: IO[str] = sys.stdout) -> None:
     print_rows(rows, file)
 
 
+def print_chats(chats: list[ChatsEntry], file: IO[str] = sys.stdout) -> None:
+    def name(saved: Nameable) -> str:
+        return saved.name or saved.uuid
+
+    def saved_under(entry: ChatsEntry) -> list[str]:
+        organization = entry.chat_list.organization
+        if not isinstance(organization, Organization):
+            return ["(export)", "(export)"]
+        return [name(organization.account), name(organization)]
+
+    def branch(entry: ChatsEntry) -> Event | None:
+        chat = claude_ai.read(chat_file(entry).read_text(encoding="utf-8"))
+        return chat.branch if chat else None
+
+    columns = [[entry.uuid for entry in chats], *zip(*map(saved_under, chats))]
+    shown = columns[:1] + [column for column in columns[1:] if len(set(column)) > 1]
+    print_rows(zip(map(list, zip(*shown)), map(branch, chats)), file)
+
+
+def select_chat(query: str) -> str:
+    chats = find_chats(query)
+    if len(chats) == 1:
+        return str(chat_file(chats[0]))
+    if chats:
+        print(
+            f'Error: Multiple saved chats match "{query}"; specify one by its ID',
+            file=sys.stderr,
+        )
+        print_chats(chats, sys.stderr)
+    else:
+        print(f'Error: "{query}" is neither a file nor a saved chat', file=sys.stderr)
+    sys.exit(1)
+
+
 def select_branch(chat: Chat, branch: str | None) -> Message:
     try:
         return chat.select(branch)
@@ -51,11 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
-        "file",
+        "chat",
         nargs="?",
-        type=argparse.FileType("r", encoding="utf-8"),
-        default=sys.stdin,
-        help="JSON file to convert (default: stdin)",
+        default="-",
+        help="chat JSON, UUID, name, or URL (default: stdin)",
     )
 
     branches = parser.add_argument_group("branches").add_mutually_exclusive_group()
@@ -122,9 +158,19 @@ def to_markdown() -> None:
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
 
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
 
-    chat = read(args.file)
+    path = args.chat
+    if path != "-" and not os.path.exists(path):
+        path = select_chat(path)
+    try:
+        with sys.stdin if path == "-" else open(path, encoding="utf-8") as file:
+            chat = read(file)
+    except OSError as e:
+        sys.exit(f"Error: {e}")
+    except ValueError as e:
+        parser.error(str(e))
 
     if args.branches:
         print_branches(chat)

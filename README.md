@@ -4,7 +4,7 @@ Convert Claude.ai or Claude Code chat exports to Markdown format.
 
 `claude2md` converts chats exported from Claude.ai or Claude Code to Markdown format. This lets you efficiently show entire chats to other models or instances until you struggle to remember which transcript of a chat full of transcripts of chats full of transcripts of chats is the right one (aka slopception).
 
-For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) can fetch a local copy of your chats for `claude2md`.
+For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) can fetch a local copy of your chats for `claude2md`. Give `claude2md` a chat's ID, name, or URL and it finds the chat in what `claude-backup` saved.
 
 ## Features
 
@@ -38,12 +38,12 @@ The bleeding-edge way:
 ## Usage
 
     $ claude2md --help
-    usage: claude2md [-h] [-v] [-B | -b ID | -A] [-n] [-N] [-u] [-a] [-t] [file]
+    usage: claude2md [-h] [-v] [-B | -b ID | -A] [-n] [-N] [-u] [-a] [-t] [chat]
 
     Convert Claude.ai or Claude Code chats to Markdown
 
     positional arguments:
-      file                JSON file to convert (default: stdin)
+      chat                chat JSON, UUID, name, or URL (default: stdin)
 
     options:
       -h, --help          show this help message and exit
@@ -51,7 +51,7 @@ The bleeding-edge way:
 
     branches:
       -B, --branches      list all branches
-      -b ID, --branch ID  show messages from a specific non-default branch
+      -b, --branch ID     show messages from a specific non-default branch
       -A, --all-branches  show messages from all branches tagged with branch IDs
 
     filters:
@@ -65,7 +65,7 @@ The bleeding-edge way:
 
 #### Claude.ai
 
-    $ claude2md -uat ~/.local/share/claude-backup/f50d0792-fa79-4d2d-a945-c8f709e9e7a7/c6a33008-39b3-45ed-a00e-413141c89a90.json | head -n20
+    $ claude2md -uat c6a33008 | head -n20
     # Python packaging complexity
 
     > why is python packaging such a clusterfuck? ultrathink
