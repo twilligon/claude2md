@@ -132,6 +132,7 @@ class Message(Event):
     role: Role
     blocks: list[Block | ToolUse | ToolResult]
     created_at: datetime
+    started_at: datetime | None = None
     attachments: list[Attachment] = field(default_factory=list)
     files: list[File] = field(default_factory=list)
     fallback: Fallback | None = None

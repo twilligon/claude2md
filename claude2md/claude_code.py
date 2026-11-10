@@ -494,10 +494,12 @@ class Session:
     id: str
     named: str
     last: str | None = field(default=None, init=False)
+    count: int = field(default=0, init=False)
     uploaded: set[str] = field(default_factory=set, init=False)
 
     def chain(self, rec: dict[str, Any]) -> dict[str, Any]:
         self.last = rec["uuid"]
+        self.count += 1
         return rec
 
     def upload(self, name: str, id: str, source: Path | None) -> str:
@@ -911,6 +913,37 @@ class Session:
                     "sessionId": self.id,
                 }
             )
+        if blocks and (rec := self.duration(msg)):
+            yield rec
+
+    def duration(self, msg: Message) -> dict[str, Any] | None:
+        if msg.stop_reason in (None, "user_canceled", "tool_use"):
+            return None
+        prompt = msg.parent
+        first = next(
+            m for m in self.chat.messages if m.parent is prompt and m.role == msg.role
+        )
+        start = msg.started_at
+        if isinstance(prompt, Message) and prompt.role == Role.USER and first is msg:
+            start = prompt.created_at
+        end = max([msg.created_at, *(b.at for b in msg.blocks if b.at)])
+        if start is None or end < start:
+            return None
+        return self.chain(
+            {
+                "parentUuid": self.last,
+                "isSidechain": False,
+                "type": "system",
+                "subtype": "turn_duration",
+                "durationMs": round((end - start).total_seconds() * 1000),
+                "messageCount": self.count,
+                "timestamp": stamp(end),
+                "uuid": derive(msg.id, "duration"),
+                "isMeta": False,
+                "cwd": CWD,
+                "sessionId": self.id,
+            }
+        )
 
     def records(
         self, leaf: Message, system_prompt: str | None = None
