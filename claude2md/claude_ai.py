@@ -1,5 +1,6 @@
+from functools import partial
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, Callable
 
 import json
 import sys
@@ -9,8 +10,10 @@ from claude2md.chat import (
     Block,
     Chat,
     File,
+    Gallery,
     Message,
     Role,
+    SearchResult,
     ToolResult,
     ToolUse,
     oneline,
@@ -37,7 +40,7 @@ def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
         by_uuid[data["uuid"]] = Message(
             parent=parent,
             role=ROLES[data["sender"]],
-            blocks=parse_content(data["content"], lossy),
+            blocks=parse_content(data["content"], partial(results, lossy=lossy), lossy),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
         )
@@ -96,6 +99,47 @@ def unsupported(what: str, lossy: bool) -> None:
     print(f"lossy: unsupported {what}", file=sys.stderr)
 
 
+def results(
+    content: list[dict[str, Any]], lossy: bool = False
+) -> list[str | File | SearchResult | Gallery]:
+    parts: list[str | File | SearchResult | Gallery] = []
+    for item in content:
+        match item["type"]:
+            case "text":
+                text = item["text"]
+            case "image":
+                parts.append(File("", "image", item["file_uuid"]))
+                continue
+            case "knowledge":
+                parts.append(
+                    SearchResult(
+                        item["title"],
+                        item["url"],
+                        item.get("text") or "",
+                        (item.get("prompt_context_metadata") or {}).get("age") or None,
+                        item["is_missing"],
+                    )
+                )
+                continue
+            case "image_gallery":
+                parts.append(
+                    Gallery(
+                        tuple(
+                            (img["title"], img["url"], img["page_url"])
+                            for img in item["images"]
+                        ),
+                        item["is_expired"],
+                    )
+                )
+                continue
+            case item_type:
+                unsupported(f'item type "{item_type}"', lossy)
+                continue
+        if text.strip():
+            parts.append(text)
+    return parts
+
+
 def parse_block(obj: dict[str, Any], lossy: bool = False) -> Block | ToolUse | None:
     match obj["type"]:
         case "text":
@@ -124,7 +168,9 @@ def parse_block(obj: dict[str, Any], lossy: bool = False) -> Block | ToolUse | N
 
 
 def parse_content(
-    content: list[dict[str, Any]], lossy: bool = False
+    content: list[dict[str, Any]],
+    results: Callable[[Any], list[str | File | SearchResult | Gallery]],
+    lossy: bool = False,
 ) -> list[Block | ToolUse | ToolResult]:
     blocks: list[Block | ToolUse | ToolResult] = []
     unanswered: list[ToolUse] = []
@@ -133,7 +179,8 @@ def parse_content(
             wanted = obj.get("tool_use_id")
             if use := next((u for u in unanswered if wanted in (None, u.id)), None):
                 unanswered.remove(use)
-                blocks.append(ToolResult(use))
+                error = obj.get("is_error", False)
+                blocks.append(ToolResult(use, results(obj.get("content", [])), error))
         elif block := parse_block(obj, lossy):
             blocks.append(block)
             if isinstance(block, ToolUse):

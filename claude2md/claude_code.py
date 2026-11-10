@@ -4,7 +4,7 @@ from typing import Any, Iterable
 
 import json
 
-from claude2md.chat import Block, Chat, Event, Message, Role
+from claude2md.chat import Block, Chat, Event, Message, Role, SearchResult
 from claude2md.claude_ai import parse_content
 
 
@@ -77,7 +77,7 @@ def user(
     if isinstance(content, str):
         blocks = [Block("text", content)]
     else:
-        blocks = parse_content(content, lossy=lossy)
+        blocks = parse_content(content, results, lossy=lossy)
     return Message(parent, Role.USER, blocks)
 
 
@@ -90,5 +90,18 @@ def assistant(
         if not isinstance(api, dict) or not isinstance(api.get("content"), list):
             continue
         content += api["content"]
-    blocks = parse_content(content, lossy)
+    blocks = parse_content(content, results, lossy)
     return Message(parent, Role.ASSISTANT, blocks)
+
+
+def results(content: str | list[dict[str, Any]]) -> list[str | SearchResult]:
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    parts: list[str | SearchResult] = []
+    for b in content:
+        if b.get("type") == "text":
+            parts.append(b["text"])
+        elif b.get("type") == "search_result":
+            body = "\n\n".join(c["text"] for c in b["content"])
+            parts.append(SearchResult(b["title"], b["source"], body))
+    return [p for p in parts if (p if isinstance(p, str) else p.text).strip()]
