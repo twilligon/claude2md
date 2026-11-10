@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import groupby, pairwise
 from json import JSONDecodeError
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
 from typing import IO, Any, BinaryIO, Callable, Iterable, Iterator
 
@@ -12,6 +12,7 @@ import difflib
 import io
 import json
 import math
+import mimetypes
 import os
 import re
 import shutil
@@ -188,6 +189,7 @@ JS_SPACE = set(" \f\n\r\t\v\u00a0\u1680\u2028\u2029\u202f\u205f\u3000\ufeff") | 
     chr(c) for c in range(0x2000, 0x200B)
 }
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+SENT = re.compile(r"^  (.+) \u2192 file_uuid: ([0-9a-f-]{36})$", re.MULTILINE)
 
 
 def mention(path: str) -> str:
@@ -505,6 +507,39 @@ class Session:
             self.uploaded.add(name)
         return f"{self.named}/uploads/{self.id}/{name}"
 
+    def sent(self, result: ToolResult) -> tuple[str, Any]:
+        lines = result.text.split("\n")
+        attachments: list[dict[str, Any]] | None = []
+        for i, line in enumerate(lines):
+            if not (m := SENT.fullmatch(line)):
+                continue
+            path, id = m[1], m[2]
+            file = File(PurePosixPath(path).name, "blob", id)
+            if not (probed := self.backup.probe(file)):
+                attachments = None
+                continue
+            name = self.backup.index.get(id, (None, ""))[1] or file.name
+            copy = self.upload(name, id, self.backup.path(file))
+            lines[i] = f"  {path} \u2192 {copy}"
+            if attachments is not None:
+                media_type = mimetypes.guess_type(path)[0]
+                attachments.append(
+                    {
+                        "path": copy,
+                        "size": probed[1],
+                        "isImage": media_type in IMAGES,
+                        **({"media_type": media_type} if media_type else {}),
+                        "pathValidated": True,
+                        "file_uuid": id,
+                    }
+                )
+        input = result.tool_use.input
+        stored = attachments and {
+            **{key: input[key] for key in ("caption", "display") if key in input},
+            "attachments": attachments,
+        }
+        return "\n".join(lines), stored or None
+
     def user(
         self, msg: Message, prompt_id: str, system_prompt: str | None = None
     ) -> Iterator[dict[str, Any]]:
@@ -668,6 +703,10 @@ class Session:
         asked = result.tool_use.name != call.name == "AskUserQuestion"
         if asked and not result.is_error:
             result = ToolResult(result.tool_use, [ASKED], result.is_error, result.at)
+        delivered = None
+        if call.name == "SendUserFile" and not result.is_error:
+            text, delivered = self.sent(result)
+            result = ToolResult(result.tool_use, [text], result.is_error, result.at)
         if len(result.content) == 1 and isinstance(file := result.content[0], File):
             kind, size = self.backup.probe(file) or (None, 0)
             if kind in IMAGES:
@@ -682,7 +721,7 @@ class Session:
                 }
                 block = {"type": "image", "source": source}
                 return [block], {"type": "image", "file": stored}
-        stored = kept(result, call)
+        stored = delivered or kept(result, call)
         match result.content:
             case [SearchResult(body=body)] if call.name == "WebFetch" and body:
                 return body, stored
