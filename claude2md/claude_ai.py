@@ -10,6 +10,7 @@ from claude2md.chat import (
     Attachment,
     Block,
     Chat,
+    Fallback,
     File,
     Gallery,
     Message,
@@ -35,6 +36,7 @@ def read(text: str, lossy: bool = False) -> Chat | None:
 
 def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
     by_uuid: dict[str, Message] = {}
+    flagged, fallback = safeguard_fallback(export)
     call, ran = handoff(export)
     cowork = False
     for data in export["chat_messages"]:
@@ -49,6 +51,7 @@ def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
             created_at=datetime.fromisoformat(data["created_at"]),
             attachments=pasted,
             files=files(data, {a.id for a in pasted}),
+            fallback=fallback if data["uuid"] == flagged else None,
             stop_reason=data.get("stop_reason"),
             cowork=cowork,
             id=data["uuid"],
@@ -57,6 +60,19 @@ def parse(export: dict[str, Any], lossy: bool = False) -> Chat:
         list(by_uuid.values()),
         name=oneline(export.get("name") or "") or None,
         leaf=by_uuid.get(export.get("current_leaf_message_uuid")),
+    )
+
+
+def safeguard_fallback(export: dict[str, Any]) -> tuple[str | None, Fallback | None]:
+    fallback = (export.get("settings") or {}).get("safeguard_fallback")
+    if not fallback:
+        return None, None
+    hops = fallback["hops"]
+    return fallback["turn_uuid"], Fallback(
+        hops[0]["from_model"]["model"],
+        hops[-1]["to_model"]["model"],
+        tuple(hop["category"] for hop in hops),
+        fallback["explanation"],
     )
 
 
