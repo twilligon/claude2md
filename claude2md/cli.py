@@ -1,5 +1,6 @@
 from contextlib import suppress
 from functools import partial
+from pathlib import Path
 from typing import IO, Iterable
 
 import argparse
@@ -10,7 +11,7 @@ import sys
 from claude_backup import ChatsEntry, Nameable, Organization
 
 from claude2md import __version__, claude_ai, claude_code, markdown
-from claude2md.backup import Backup, chat_file, find_chats, uploads_dirs
+from claude2md.backup import Backup, chat_file, copies, find_chats, uploads_dirs
 from claude2md.chat import Chat, Event, Message
 
 DESCRIPTIONS = {
@@ -19,9 +20,9 @@ DESCRIPTIONS = {
 }
 
 
-def read(file: IO[str], lossy: bool = False) -> Chat:
+def read(file: IO[str], exported: str | None = None, lossy: bool = False) -> Chat:
     text = file.read()
-    return claude_ai.read(text, lossy) or claude_code.read(text, lossy)
+    return claude_ai.read(text, exported, lossy) or claude_code.read(text, lossy)
 
 
 def print_rows(rows: Iterable[tuple[list[str], Event | None]], file: IO[str]) -> None:
@@ -200,9 +201,11 @@ def main(to: str) -> None:
     path = args.chat
     if path != "-" and not os.path.exists(path):
         path = select_chat(path, args.lossy)
+    path, exported = (path, None) if path == "-" else copies(path)
     try:
         with sys.stdin if path == "-" else open(path, encoding="utf-8") as file:
-            chat = read(file, args.lossy)
+            twin = exported and Path(exported).read_text(encoding="utf-8")
+            chat = read(file, twin, args.lossy)
     except OSError as e:
         sys.exit(f"Error: {e}")
     except ValueError as e:
