@@ -57,10 +57,10 @@ The bleeding-edge way:
     branches:
       -B, --branches      list all branches
       -b, --branch ID     use a specific non-default branch
-      -A, --all-branches  show messages from all branches tagged with branch IDs
+      -A, --all-branches  show messages from all branches
 
     filters:
-      -n, --name          always show chat name (or "Untitled" if none)
+      -n, --name          always show chat name (or "Untitled")
       -N, --no-name       never show chat name
       -u, --user          show user messages
       -a, --assistant     show assistant messages

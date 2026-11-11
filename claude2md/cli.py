@@ -148,7 +148,7 @@ def build_parser(to: str) -> argparse.ArgumentParser:
         "-A",
         "--all-branches",
         action="store_true",
-        help="show messages from all branches tagged with branch IDs",
+        help="show messages from all branches",
     )
 
     filters = parser.add_argument_group("filters")
@@ -157,7 +157,7 @@ def build_parser(to: str) -> argparse.ArgumentParser:
         "--name",
         action="store_true",
         default=None,
-        help='always show chat name (or "Untitled" if none)',
+        help='always show chat name (or "Untitled")',
     )
     filters.add_argument(
         "-N",
