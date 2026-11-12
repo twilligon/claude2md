@@ -2,6 +2,7 @@ from datetime import datetime
 from functools import partial
 from json import JSONDecodeError
 from typing import Any, Callable
+from uuid import UUID
 
 import json
 import sys
@@ -158,6 +159,13 @@ def done(data: dict[str, Any]) -> list[datetime | None]:
     ]
 
 
+def file_id(value: str) -> str:
+    try:
+        return str(UUID(value))
+    except ValueError:
+        raise ValueError(f"{value!r} is not a file ID") from None
+
+
 def attachments(data: dict[str, Any]) -> list[Attachment]:
     pasted = data.get("attachments", [])
     listed = data.get("files") or []
@@ -165,7 +173,7 @@ def attachments(data: dict[str, Any]) -> list[Attachment]:
         Attachment(
             a.get("file_name"),
             a.get("file_type"),
-            (
+            file_id(
                 a["id"]
                 if "id" in a
                 else listed[len(listed) - len(pasted) + n]["file_uuid"]
@@ -184,18 +192,18 @@ def files(data: dict[str, Any], pasted: set[str]) -> list[File]:
         if b["type"] == "image"
     ]
     pages = {
-        f["file_uuid"]: count
+        file_id(f["file_uuid"]): count
         for f in listed
         if (count := (f.get("document_asset") or {}).get("page_count")) is not None
     }
     previews = {
-        f["file_uuid"]: (preview["image_width"], preview["image_height"])
+        file_id(f["file_uuid"]): (preview["image_width"], preview["image_height"])
         for f in listed
         if "image_width" in (preview := f.get("preview_asset") or {})
     }
     files: dict[str, File] = {}
     for f in listed:
-        id = f["file_uuid"]
+        id = file_id(f["file_uuid"])
         if id in pasted:
             continue
         file = File(
@@ -224,7 +232,7 @@ def results(
             case "text":
                 text = item["text"]
             case "image":
-                parts.append(File("", "image", item["file_uuid"]))
+                parts.append(File("", "image", file_id(item["file_uuid"])))
                 continue
             case "knowledge":
                 parts.append(
