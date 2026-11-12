@@ -12,8 +12,10 @@ import sys
 
 from claude_backup import (
     Account,
+    Chats,
     ChatsEntry,
     Client,
+    Files,
     Nameable,
     Organization,
     SomeOrganization,
@@ -50,14 +52,21 @@ def organizations(store: Store) -> list[Organization]:
     ]
 
 
-def store_of(export: Path) -> Store | None:
-    directory = export.absolute().parent
-    return Store(directory.parent) if directory.name == Store.COMPAT_VERSION else None
+def store_of(path: Path) -> Store | None:
+    for directory in path.absolute().parents:
+        if directory.name == Store.COMPAT_VERSION:
+            return Store(directory.parent)
+    return None
 
 
 def chat_file(entry: ChatsEntry) -> Path:
     path = entry.store.store_dir / entry.chat_store_path()
     return path.with_name(f"{path.name}.json")
+
+
+def held(chat_list: Chats, id: str) -> ChatsEntry | None:
+    entry = chat_list.entry(id)
+    return entry if entry and chat_file(entry).is_file() else None
 
 
 CHAT_URL = re.compile(r"(?:https?://)?claude\.ai/chat/([0-9a-f-]{36})")
@@ -81,51 +90,45 @@ def find_chats(query: str) -> list[ChatsEntry]:
 
 
 def copies(path: str) -> tuple[str, str | None]:
-    chats = Path(path).parent
-    if chats.name != "chats":
+    chat = Path(path).absolute()
+    if (store := store_of(chat)) is None:
         return path, None
-    id = Path(path).stem[-36:]
-    if chats.parent.name != "export":
-        exported = listed(chats.parent.parent.parent / "export", id)
-        return path, str(exported) if exported else None
-    store = store_of(chats.parent)
-    held = [
+    id = chat.stem[-36:]
+    exported = held(SomeOrganization(store).chat_list(), id)
+    if exported is None:
+        return path, None
+    if not chat_file(exported).samefile(chat):
+        return path, str(chat_file(exported))
+    saved = [
         entry
-        for organization in (organizations(store) if store else [])
-        if (entry := organization.chat_list().entry(id)) and chat_file(entry).is_file()
+        for organization in organizations(store)
+        if (entry := held(organization.chat_list(), id))
     ]
-    if not held:
+    if not saved:
         return path, None
-    saved = chat_file(max(held, key=lambda entry: entry.updated_at))
-    return str(saved if Path(path).is_absolute() else os.path.relpath(saved)), path
+    latest = chat_file(max(saved, key=lambda entry: entry.updated_at))
+    return str(latest if Path(path).is_absolute() else os.path.relpath(latest)), path
 
 
-def listed(directory: Path, id: str) -> Path | None:
-    try:
-        with (directory / "chats.json").open(encoding="utf-8") as f:
-            entry = json.load(f).get(id)
-    except FileNotFoundError:
-        return None
-    if entry is None:
-        return None
-    name = entry.get("name")
-    slug = f"{name.translate(Nameable.FILENAME_XLAT)}-{id}" if name else id
-    return directory / "chats" / f"{slug}.json"
+def is_exported(store: Store, chat: Path) -> bool:
+    exports = store.store_dir / Chats(SomeOrganization(store)).store_path()
+    return exports.is_dir() and exports.samefile(chat.parent)
 
 
 def uploads_dirs(path: str) -> tuple[Path, ...]:
     if path.startswith("<"):
         return (Path("files"),)
-    chats = Path(path).absolute().parent
-    found = (chats.parent / "files",)
-    if chats.parent.name == "export" and (store := store_of(chats.parent)):
+    chat = Path(path).absolute()
+    found = (chat.parent.parent / "files",)
+    if (store := store_of(chat)) and is_exported(store, chat):
         found = (
             tuple(
-                org / "files"
-                for org in sorted(
-                    store.store_dir / o.store_path() for o in organizations(store)
+                files
+                for files in sorted(
+                    store.store_dir / Files(organization).store_path()
+                    for organization in organizations(store)
                 )
-                if (org / "files.json").is_file()
+                if (files.parent / "files.json").is_file()
             )
             or found
         )
