@@ -69,7 +69,7 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
             continue
         if data.get("type") == "assistant" or is_results(data):
             turn.append(data)
-        elif turn and data.get("type") != "user":
+        elif turn and data.get("type") != "user" and prompt(data) is None:
             turn.append(data)
         else:
             flush()
@@ -96,17 +96,26 @@ def is_results(data: dict[str, Any]) -> bool:
     )
 
 
-def user(
-    data: dict[str, Any], parent: Event | None, lossy: bool = False
-) -> Message | None:
+def prompt(data: dict[str, Any]) -> str | list[dict[str, Any]] | None:
+    if data.get("type") == "attachment":
+        queued = data.get("attachment") or {}
+        if queued.get("type") != "queued_command" or queued.get("isMeta"):
+            return None
+        return queued.get("prompt") if queued.get("commandMode") == "prompt" else None
     if data.get("type") != "user" or data.get("isMeta"):
         return None
     if (data.get("origin") or {}).get("kind") == "task-notification":
         return None
+    api = data.get("message")
+    return api.get("content") if isinstance(api, dict) else None
+
+
+def user(
+    data: dict[str, Any], parent: Event | None, lossy: bool = False
+) -> Message | None:
     if data.get("isCompactSummary") and parent and parent.message:
         return None
-    api = data.get("message")
-    if not isinstance(api, dict) or (content := api.get("content")) is None:
+    if (content := prompt(data)) is None:
         return None
     if isinstance(content, str):
         blocks = [Block("text", content)]
