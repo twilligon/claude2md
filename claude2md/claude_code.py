@@ -52,6 +52,7 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
     messages: list[Message] = []
     turn: list[dict[str, Any]] = []
     explicit = None
+    name = None
 
     def flush() -> None:
         nonlocal turn
@@ -65,6 +66,8 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
     for data in records:
         if data.get("type") == "last-prompt":
             explicit = data.get("leafUuid") if data.get("explicit") else None
+        if data.get("type") == "custom-title":
+            name = data.get("customTitle")
         if "uuid" not in data or data.get("isSidechain"):
             continue
         if data.get("type") == "assistant" or is_results(data):
@@ -82,7 +85,7 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
                 messages.append(event)
     flush()
     leaf = by_uuid[explicit].message if explicit in by_uuid else None
-    return Chat(messages, leaf=leaf or next(reversed(messages), None))
+    return Chat(messages, name, leaf or next(reversed(messages), None))
 
 
 def is_results(data: dict[str, Any]) -> bool:
