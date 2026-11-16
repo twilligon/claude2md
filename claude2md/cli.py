@@ -98,7 +98,6 @@ def build_parser(to: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "chat",
         nargs="?",
-        default="-",
         help="chat JSON, UUID, name, or URL (default: stdin)",
     )
     if to == "markdown":
@@ -199,6 +198,11 @@ def main(to: str) -> None:
     args = parser.parse_args()
 
     path = args.chat
+    if path is None:
+        if sys.stdin.isatty():
+            parser.print_help(sys.stderr)
+            parser.exit(2)
+        path = "-"
     if path != "-" and not os.path.exists(path):
         path = select_chat(path, args.lossy)
     path, exported = (path, None) if path == "-" else copies(path)
