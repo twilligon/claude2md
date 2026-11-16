@@ -4,4 +4,4 @@
 
 """Convert Claude.ai or Claude Code chats to Markdown"""
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
