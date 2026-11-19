@@ -49,6 +49,37 @@ def read(text: str, lossy: bool = False) -> Chat:
     return parse(records, lossy)
 
 
+def relink(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for boundary in [r for r in records if r.get("subtype") == "compact_boundary"]:
+        meta = (boundary.get("compactMetadata") or {}).get("preservedMessages") or {}
+        ids, anchor = meta.get("uuids") or [], meta.get("anchorUuid")
+        rows = {r["uuid"]: r for r in records if "uuid" in r}
+        if not ids or anchor == boundary["uuid"] or not {anchor, *ids} <= rows.keys():
+            continue
+        if (head := rows[ids[0]]).get("parentUuid") == anchor:
+            continue
+        previous = dict(zip(ids[1:], ids))
+        under = [u for u in ids if rows[u].get("parentUuid") == anchor]
+        local = head.get("parentUuid") in rows
+        tail = previous[under[0]] if under else ids[-1]
+        origin = tail if local else head.get("parentUuid")
+        relinked: list[dict[str, Any]] = []
+        for r in records:
+            if r is boundary:
+                r = {**r, "logicalParentUuid": origin}
+            elif r.get("uuid") in previous and (
+                r.get("parentUuid") == anchor or r.get("parentUuid") not in rows
+            ):
+                r = {**r, "parentUuid": previous[r["uuid"]]}
+            elif not local and r is head:
+                r = {**r, "parentUuid": anchor}
+            elif not local and r.get("parentUuid") == anchor:
+                r = {**r, "parentUuid": ids[-1]}
+            relinked.append(r)
+        records = relinked
+    return records
+
+
 def ordered(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     at: dict[str, int] = {}
     for i, r in enumerate(records):
@@ -85,7 +116,7 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
                 by_uuid[data["uuid"]] = message
         turn = []
 
-    for data in ordered(list(records)):
+    for data in ordered(relink(list(records))):
         if data.get("type") == "last-prompt":
             explicit = data.get("leafUuid") if data.get("explicit") else None
         if data.get("type") == "custom-title":
