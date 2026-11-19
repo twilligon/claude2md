@@ -72,31 +72,19 @@ def held(chat_list: Chats, id: str) -> ChatsEntry | None:
 CHAT_URL = re.compile(r"(?:https?://)?claude\.ai/chat/([0-9a-f-]{36})")
 
 
-class Named(Protocol):
+class Identified(Protocol):
     @property
     def uuid(self) -> str: ...
 
-    @property
-    def name(self) -> str | None: ...
+
+IdentifiedT = TypeVar("IdentifiedT", bound=Identified)
 
 
-NamedT = TypeVar("NamedT", bound=Named)
-
-
-def find_chats(query: str, chats: list[NamedT]) -> list[NamedT]:
+def find_chats(query: str, chats: list[IdentifiedT]) -> list[IdentifiedT]:
     query = query.casefold()
     if url := CHAT_URL.match(query):
         query = url[1]
-    return (
-        [entry for entry in chats if entry.uuid == query]
-        or [entry for entry in chats if entry.name and entry.name.casefold() == query]
-        or [
-            entry
-            for entry in chats
-            if entry.uuid.startswith(query)
-            or (entry.name or "").casefold().startswith(query)
-        ]
-    )
+    return [entry for entry in chats if entry.uuid.startswith(query)]
 
 
 def copies(path: str) -> tuple[str, str | None]:

@@ -4,7 +4,7 @@ Convert Claude.ai or Claude Code chat exports to Markdown format.
 
 `claude2md` converts chats exported from Claude.ai or Claude Code to Markdown format. This lets you efficiently show entire chats to other models or instances until you struggle to remember which transcript of a chat full of transcripts of chats full of transcripts of chats is the right one (aka slopception).
 
-For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) can fetch a local copy of your chats for `claude2md`. Give `claude2md` a chat's ID, name, or URL and it finds the chat in what `claude-backup` saved.
+For Claude.ai chats, [`claude-backup`](https://github.com/twilligon/claude-backup) can fetch a local copy of your chats for `claude2md`. Give `claude2md` a chat's ID or URL and it finds the chat in what `claude-backup` saved.
 
 ## Features
 
@@ -45,7 +45,7 @@ The bleeding-edge way:
     Convert Claude.ai or Claude Code chats to Markdown
 
     positional arguments:
-      chat                chat JSON, UUID, name, or URL (default: stdin)
+      chat                chat JSON, UUID, or URL (default: stdin)
 
     options:
       -h, --help          show this help message and exit
@@ -67,7 +67,7 @@ The bleeding-edge way:
       -t, --thinking      show thinking blocks
       -T, --timestamps    show timestamps
 
-`claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code. PDF pages the chat read are rendered with `pdftoppm`.
+`claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code c6a33008)"` carries on with the chat in Claude Code. PDF pages the chat read are rendered with `pdftoppm`.
 
     $ claude2code --help
     usage: claude2code [-h] [-v] [-s PROMPT] [-L] [-B | -b ID] [chat]
@@ -75,7 +75,7 @@ The bleeding-edge way:
     Import a Claude.ai chat as a Claude Code session
 
     positional arguments:
-      chat                 chat JSON, UUID, name, or URL (default: stdin)
+      chat                 chat JSON, UUID, or URL (default: stdin)
 
     options:
       -h, --help           show this help message and exit

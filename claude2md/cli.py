@@ -120,7 +120,7 @@ def build_parser(to: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "chat",
         nargs="?",
-        help="chat JSON, UUID, name, or URL (default: stdin)",
+        help="chat JSON, UUID, or URL (default: stdin)",
     )
     if to == "markdown":
         parser.add_argument(

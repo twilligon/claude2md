@@ -1110,7 +1110,6 @@ def claude_dir(cwd: Path) -> tuple[Path, str]:
 @dataclass(frozen=True)
 class Transcript:
     path: Path
-    name = None
 
     @property
     def uuid(self) -> str:
