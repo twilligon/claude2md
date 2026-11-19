@@ -101,6 +101,8 @@ def user(
 ) -> Message | None:
     if data.get("type") != "user" or data.get("isMeta"):
         return None
+    if (data.get("origin") or {}).get("kind") == "task-notification":
+        return None
     if data.get("isCompactSummary") and parent and parent.message:
         return None
     api = data.get("message")
