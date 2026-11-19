@@ -145,6 +145,7 @@ def build_parser(to: str) -> argparse.ArgumentParser:
             help="use a custom system prompt",
         )
     parser.add_argument(
+        "-L",
         "--lossy",
         action="store_true",
         help="make do without what's missing or unsupported",

@@ -38,8 +38,8 @@ The bleeding-edge way:
 ## Usage
 
     $ claude2md --help
-    usage: claude2md [-h] [-v] [-e] [-E] [--lossy] [-B | -b ID | -A] [-n] [-N]
-                     [-u] [-a] [-t] [-T]
+    usage: claude2md [-h] [-v] [-e] [-E] [-L] [-B | -b ID | -A] [-n] [-N] [-u]
+                     [-a] [-t] [-T]
                      [chat]
 
     Convert Claude.ai or Claude Code chats to Markdown
@@ -52,7 +52,7 @@ The bleeding-edge way:
       -v, --version       show program's version number and exit
       -e, --embed         embed media as data URLs
       -E, --no-embed      link text attachments like media
-      --lossy             make do without what's missing or unsupported
+      -L, --lossy         make do without what's missing or unsupported
 
     branches:
       -B, --branches      list all branches
@@ -70,7 +70,7 @@ The bleeding-edge way:
 `claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code. PDF pages the chat read are rendered with `pdftoppm`.
 
     $ claude2code --help
-    usage: claude2code [-h] [-v] [-s PROMPT] [--lossy] [-B | -b ID] [chat]
+    usage: claude2code [-h] [-v] [-s PROMPT] [-L] [-B | -b ID] [chat]
 
     Import a Claude.ai chat as a Claude Code session
 
@@ -81,7 +81,7 @@ The bleeding-edge way:
       -h, --help           show this help message and exit
       -v, --version        show program's version number and exit
       -s, --system PROMPT  use a custom system prompt
-      --lossy              make do without what's missing or unsupported
+      -L, --lossy          make do without what's missing or unsupported
 
     branches:
       -B, --branches       list all branches
