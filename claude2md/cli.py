@@ -12,7 +12,7 @@ from claude_backup import ChatsEntry, Nameable, Organization
 
 from claude2md import __version__, claude_ai, claude_code, markdown
 from claude2md.backup import Backup, chat_file, copies, find_chats, uploads_dirs
-from claude2md.chat import Chat, Event, Message
+from claude2md.chat import Chat, Event, Message, stamp
 
 DESCRIPTIONS = {
     "markdown": "Convert Claude.ai or Claude Code chats to Markdown",
@@ -36,8 +36,13 @@ def print_rows(rows: Iterable[tuple[list[str], Event | None]], file: IO[str]) ->
         print(line + (branch.preview(width) if branch else ""), file=file)
 
 
-def print_branches(chat: Chat, file: IO[str] = sys.stdout) -> None:
-    rows = (([f"{index:x}"], msg) for msg, index in chat.branches.items())
+def print_branches(
+    chat: Chat, file: IO[str] = sys.stdout, timestamps: bool = False
+) -> None:
+    rows = (
+        ([stamp(msg.ended_at)] * timestamps + [f"{index:x}"], msg)
+        for msg, index in chat.branches.items()
+    )
     print_rows(rows, file)
 
 
@@ -186,6 +191,12 @@ def build_parser(to: str) -> argparse.ArgumentParser:
         default=None,
         help="show thinking blocks",
     )
+    filters.add_argument(
+        "-T",
+        "--timestamps",
+        action="store_true",
+        help="show timestamps",
+    )
     return parser
 
 
@@ -218,12 +229,12 @@ def main(to: str) -> None:
 
     try:
         if args.branches:
-            print_branches(chat)
+            print_branches(chat, timestamps=to == "markdown" and args.timestamps)
         elif to == "markdown":
             if args.user is args.assistant is args.thinking is None:
                 args.user, args.assistant, args.thinking = True, True, False
             options = markdown.Options(
-                args.user, args.assistant, args.thinking, args.embed
+                args.user, args.assistant, args.thinking, args.embed, args.timestamps
             )
             if args.all_branches:
                 markdown.write_all(chat, backup, options, args.name)

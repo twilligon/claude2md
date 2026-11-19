@@ -1,6 +1,6 @@
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from itertools import groupby, pairwise
 from json import JSONDecodeError
 from pathlib import Path, PurePosixPath
@@ -34,6 +34,7 @@ from claude2md.chat import (
     SearchResult,
     ToolResult,
     ToolUse,
+    stamp,
 )
 from claude2md.claude_ai import parse_content
 
@@ -223,10 +224,6 @@ def mention(path: str) -> str:
     end = path[-1:]
     bare = end.isascii() and (end.isalnum() or end == "_") and not JS_SPACE & set(path)
     return f"@{path}" if bare else f'@"{path}"'
-
-
-def stamp(when: datetime) -> str:
-    return when.astimezone(UTC).isoformat(timespec="milliseconds")[:-6] + "Z"
 
 
 def hunks(old: str, new: str) -> list[dict[str, Any]]:
@@ -1004,7 +1001,7 @@ class Session:
         start = msg.started_at
         if isinstance(prompt, Message) and prompt.role == Role.USER and first is msg:
             start = prompt.created_at
-        end = max([msg.created_at, *(b.at for b in msg.blocks if b.at)])
+        end = msg.ended_at
         if start is None or end < start:
             return None
         return self.chain(

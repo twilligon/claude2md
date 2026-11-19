@@ -39,7 +39,7 @@ The bleeding-edge way:
 
     $ claude2md --help
     usage: claude2md [-h] [-v] [-e] [-E] [--lossy] [-B | -b ID | -A] [-n] [-N]
-                     [-u] [-a] [-t]
+                     [-u] [-a] [-t] [-T]
                      [chat]
 
     Convert Claude.ai or Claude Code chats to Markdown
@@ -65,6 +65,7 @@ The bleeding-edge way:
       -u, --user          show user messages
       -a, --assistant     show assistant messages
       -t, --thinking      show thinking blocks
+      -T, --timestamps    show timestamps
 
 `claude2code` writes the chat as a Claude Code session and prints the session's ID, so `claude --resume "$(claude2code 'Chat name')"` carries on with the chat in Claude Code. PDF pages the chat read are rendered with `pdftoppm`.
 

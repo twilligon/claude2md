@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from itertools import groupby
 from pathlib import Path
@@ -12,7 +13,7 @@ import re
 import sys
 
 from claude2md.backup import Backup, base64_stream, whatwg_type
-from claude2md.chat import Block, Chat, File, Message, Role
+from claude2md.chat import Block, Chat, File, Message, Role, stamp
 
 
 class Writer:
@@ -22,9 +23,11 @@ class Writer:
         self.prefix = ""
         self.pending = ""
 
-    def section(self, prefix: str = "", quote: str = "") -> None:
-        self.pending = ("" if self.first else prefix + "\n") + prefix + quote
+    def section(self, prefix: str = "", quote: str = "", note: str = "") -> None:
         self.prefix = prefix + quote
+        self.pending = ("" if self.first else prefix + "\n") + self.prefix
+        if note:
+            self.pending += f"{note}\n{self.prefix}"
 
     def write(self, s: str) -> None:
         if s:
@@ -45,6 +48,7 @@ class Options:
     assistant: bool = True
     thinking: bool = True
     embed: bool | None = None
+    timestamps: bool = False
 
 
 def target(path: Path) -> str:
@@ -140,11 +144,22 @@ def link(
 
 
 def render(
-    msg: Message, writer: Writer, backup: Backup, options: Options, prefix: str = ""
+    msg: Message,
+    writer: Writer,
+    backup: Backup,
+    options: Options,
+    tags: str | None = None,
 ) -> None:
+    def section(at: datetime | None = None, quote: str = "") -> None:
+        when = stamp(at or msg.created_at)
+        if tags is None:
+            writer.section("", quote, f"<!-- {when} -->" * options.timestamps)
+        else:
+            writer.section(f"{when}\t" * options.timestamps + f"{tags}\t", quote)
+
     match msg.role:
         case Role.USER if options.user:
-            writer.section(prefix, "> ")
+            section(quote="> ")
 
             for a in msg.attachments:
                 file = File(a.name or "", "document", a.id)
@@ -198,10 +213,11 @@ def render(
                 msg.blocks, key=lambda b: b.type if isinstance(b, Block) else None
             ):
                 if block_type == "thinking" and options.thinking:
-                    writer.section(prefix)
+                    thoughts = list(group)
+                    section(thoughts[0].at)
                     writer.write("<thinking>")
 
-                    for b in group:
+                    for b in thoughts:
                         writer.write("\n")
                         writer.write(b.content)
                         writer.write("\n")
@@ -209,12 +225,12 @@ def render(
                     writer.write("</thinking>\n")
                 elif block_type == "text" and options.assistant:
                     for b in group:
-                        writer.section(prefix)
+                        section(b.at)
                         writer.write(b.content)
                         writer.write("\n")
 
             if msg.files and options.assistant:
-                writer.section(prefix)
+                section()
                 for file in msg.files:
                     path, probed = backup.path(file), backup.probe(file, whatwg_type)
                     link(writer, file, backup, path, probed, options.embed)
@@ -255,7 +271,7 @@ def write_all(
 
     if heading := title(chat, name):
         tags = ",".join(f"{i:x}" for i in chat.branches.values())
-        out.write(f"{tags}\t{heading}")
+        out.write("\t" * options.timestamps + f"{tags}\t{heading}")
     writer = Writer(out, first=not heading)
     for msg in chat.messages:
-        render(msg, writer, backup, options, ",".join(ids[msg]) + "\t")
+        render(msg, writer, backup, options, ",".join(ids[msg]))

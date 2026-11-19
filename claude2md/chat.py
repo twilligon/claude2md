@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from functools import cached_property
 from typing import Any, Iterator
@@ -7,6 +7,10 @@ from typing import Any, Iterator
 
 def oneline(text: str) -> str:
     return " ".join(text.split())
+
+
+def stamp(when: datetime) -> str:
+    return when.astimezone(UTC).isoformat(timespec="milliseconds")[:-6] + "Z"
 
 
 class Role(Enum):
@@ -141,6 +145,10 @@ class Message(Event):
     stop_reason: str | None = None
     cowork: bool = False
     id: str = field(kw_only=True)
+
+    @property
+    def ended_at(self) -> datetime:
+        return max([self.created_at, *(b.at for b in self.blocks if b.at)])
 
 
 @dataclass(frozen=True)
