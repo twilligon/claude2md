@@ -11,7 +11,14 @@ import sys
 from claude_backup import ChatsEntry, Nameable, Organization
 
 from claude2md import __version__, claude_ai, claude_code, markdown
-from claude2md.backup import Backup, chat_file, copies, find_chats, uploads_dirs
+from claude2md.backup import (
+    Backup,
+    chat_file,
+    copies,
+    find_chats,
+    saved_chats,
+    uploads_dirs,
+)
 from claude2md.chat import Chat, Event, Message, stamp
 
 DESCRIPTIONS = {
@@ -46,22 +53,32 @@ def print_branches(
     print_rows(rows, file)
 
 
+Saved = ChatsEntry | claude_code.Transcript
+
+
+def saved_file(entry: Saved) -> Path:
+    if isinstance(entry, claude_code.Transcript):
+        return entry.path
+    return chat_file(entry)
+
+
 def print_chats(
-    chats: list[ChatsEntry], file: IO[str] = sys.stdout, lossy: bool = False
+    chats: list[Saved], file: IO[str] = sys.stdout, lossy: bool = False
 ) -> None:
     def name(saved: Nameable) -> str:
         return saved.name or saved.uuid
 
-    def saved_under(entry: ChatsEntry) -> list[str]:
+    def saved_under(entry: Saved) -> list[str]:
+        if isinstance(entry, claude_code.Transcript):
+            return [str(entry.path.parents[2]), entry.path.parent.name]
         organization = entry.chat_list.organization
         if not isinstance(organization, Organization):
             return ["(export)", "(export)"]
         return [name(organization.account), name(organization)]
 
-    def branch(entry: ChatsEntry) -> Event | None:
-        text = chat_file(entry).read_text(encoding="utf-8")
-        chat = claude_ai.read(text, lossy=lossy)
-        return chat.branch if chat else None
+    def branch(entry: Saved) -> Event | None:
+        with saved_file(entry).open(encoding="utf-8") as text:
+            return read(text, lossy=lossy).branch
 
     columns = [[entry.uuid for entry in chats], *zip(*map(saved_under, chats))]
     shown = columns[:1] + [column for column in columns[1:] if len(set(column)) > 1]
@@ -69,9 +86,9 @@ def print_chats(
 
 
 def select_chat(query: str, lossy: bool = False) -> str:
-    chats = find_chats(query)
+    chats = find_chats(query, [*saved_chats(), *claude_code.transcripts(Path.cwd())])
     if len(chats) == 1:
-        return str(chat_file(chats[0]))
+        return str(saved_file(chats[0]))
     if chats:
         print(
             f'Error: Multiple saved chats match "{query}"; specify one by its ID',

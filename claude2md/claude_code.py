@@ -1042,13 +1042,37 @@ class Session:
         }
 
 
-def claude_dir(cwd: Path) -> tuple[Path, str]:
+def claude_dirs(cwd: Path) -> Iterator[tuple[Path, str]]:
     if directory := os.environ.get("CLAUDE_CONFIG_DIR"):
-        return Path(directory), directory
+        yield Path(directory), directory
     for directory in (cwd, *cwd.parents):
         if (directory / ".claude" / "projects").is_dir():
-            return directory / ".claude", "~/.claude"
-    return Path.home() / ".claude", "~/.claude"
+            yield directory / ".claude", "~/.claude"
+    yield Path.home() / ".claude", "~/.claude"
+
+
+def claude_dir(cwd: Path) -> tuple[Path, str]:
+    return next(claude_dirs(cwd))
+
+
+@dataclass(frozen=True)
+class Transcript:
+    path: Path
+    name = None
+
+    @property
+    def uuid(self) -> str:
+        return self.path.stem
+
+
+def transcripts(cwd: Path) -> list[Transcript]:
+    homes = dict.fromkeys(home.resolve() for home, _ in claude_dirs(cwd))
+    nearest = {
+        path.stem: Transcript(path)
+        for home in reversed(homes)
+        for path in sorted(home.glob("projects/*/*.jsonl"))
+    }
+    return list(nearest.values())
 
 
 def write(chat: Chat, backup: Backup, leaf: Message, system_prompt: str | None) -> str:

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
-from typing import BinaryIO, Callable, Protocol, cast
+from typing import BinaryIO, Callable, Protocol, TypeVar, cast
 
 import base64
 import json
@@ -72,8 +72,18 @@ def held(chat_list: Chats, id: str) -> ChatsEntry | None:
 CHAT_URL = re.compile(r"(?:https?://)?claude\.ai/chat/([0-9a-f-]{36})")
 
 
-def find_chats(query: str) -> list[ChatsEntry]:
-    chats = saved_chats()
+class Named(Protocol):
+    @property
+    def uuid(self) -> str: ...
+
+    @property
+    def name(self) -> str | None: ...
+
+
+NamedT = TypeVar("NamedT", bound=Named)
+
+
+def find_chats(query: str, chats: list[NamedT]) -> list[NamedT]:
     query = query.casefold()
     if url := CHAT_URL.match(query):
         query = url[1]
