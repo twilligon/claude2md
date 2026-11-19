@@ -9,6 +9,7 @@ from typing import IO, Any, BinaryIO, Callable, Iterable, Iterator
 
 import base64
 import difflib
+import heapq
 import io
 import json
 import math
@@ -48,6 +49,26 @@ def read(text: str, lossy: bool = False) -> Chat:
     return parse(records, lossy)
 
 
+def ordered(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    at: dict[str, int] = {}
+    for i, r in enumerate(records):
+        if "uuid" in r:
+            at.setdefault(r["uuid"], i)
+    ready: list[int] = []
+    waiting: dict[int, list[int]] = {}
+    for i, r in enumerate(records):
+        if (parent := at.get(r.get("parentUuid"))) is None:
+            ready.append(i)
+        else:
+            waiting.setdefault(parent, []).append(i)
+    out: list[dict[str, Any]] = []
+    while ready:
+        out.append(records[i := heapq.heappop(ready)])
+        for child in waiting.pop(i, []):
+            heapq.heappush(ready, child)
+    return out + [records[i] for i in sorted(i for c in waiting.values() for i in c)]
+
+
 def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
     by_uuid: dict[str, Event] = {}
     messages: list[Message] = []
@@ -64,7 +85,7 @@ def parse(records: Iterable[dict[str, Any]], lossy: bool = False) -> Chat:
                 by_uuid[data["uuid"]] = message
         turn = []
 
-    for data in records:
+    for data in ordered(list(records)):
         if data.get("type") == "last-prompt":
             explicit = data.get("leafUuid") if data.get("explicit") else None
         if data.get("type") == "custom-title":
