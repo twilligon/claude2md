@@ -99,7 +99,9 @@ def is_results(data: dict[str, Any]) -> bool:
 def user(
     data: dict[str, Any], parent: Event | None, lossy: bool = False
 ) -> Message | None:
-    if data.get("type") != "user" or data.get("isMeta") or data.get("isCompactSummary"):
+    if data.get("type") != "user" or data.get("isMeta"):
+        return None
+    if data.get("isCompactSummary") and parent and parent.message:
         return None
     api = data.get("message")
     if not isinstance(api, dict) or (content := api.get("content")) is None:
